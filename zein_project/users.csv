@@ -1,0 +1,4 @@
+username,password,role,name
+admin,admin123,admin,Admin
+teacher1,1234,teacher,Mr John
+student1,1234,student,Mary
