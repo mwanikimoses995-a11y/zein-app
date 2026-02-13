@@ -10,7 +10,7 @@ MARKS_FILE = "marks.csv"
 
 def load_users():
     try:
-        return pd.read_csv(USERS_FILE)
+        return pd.read.users_csv(USERS_FILE)
     except:
         df = pd.DataFrame(columns=["username", "password", "role"])
         df.to_csv(USERS_FILE, index=False)
@@ -32,7 +32,7 @@ marks = load_marks()
 # =====================================
 # APP TITLE
 # =====================================
-st.title("📚 Zein School Management System")
+st.title("📚 Zein System")
 
 # =====================================
 # LOGIN SYSTEM
