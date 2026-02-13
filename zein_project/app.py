@@ -40,10 +40,8 @@ st.title("📚 Zein System")
 if "user" not in st.session_state:
 
     st.subheader("Login")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
+username = st.text_input("Username").strip()
+password = st.text_input("Password", type="password").strip()
     if st.button("Login"):
         match = users[
             (users.username == username) &
