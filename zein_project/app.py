@@ -33,19 +33,21 @@ marks = load_marks()
 # APP TITLE
 # =====================================
 st.title("📚 Zein System")
-
 # =====================================
 # LOGIN SYSTEM
 # =====================================
 if "user" not in st.session_state:
 
     st.subheader("Login")
-username = st.text_input("Username").strip()
-password = st.text_input("Password", type="password").strip()
-    if st.button("Login"):
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):   # ← FIXED HERE (quotes added)
+
         match = users[
-            (users.username == username) &
-            (users.password == password)
+            (users["username"] == username) &
+            (users["password"] == password)
         ]
 
         if not match.empty:
@@ -55,8 +57,6 @@ password = st.text_input("Password", type="password").strip()
             st.error("Wrong username or password")
 
     st.stop()
-
-
 # =====================================
 # AFTER LOGIN
 # =====================================
