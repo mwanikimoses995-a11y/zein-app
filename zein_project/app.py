@@ -147,3 +147,4 @@ elif role == "student":
 
         st.write(f"Average Score: *{round(avg,2)}*")
         st.success(msg)
+        st.write(users)
