@@ -1,4 +1,4 @@
-username,password,role,name
-admin,12345,admin,Admin
-teacher1,1234,teacher,Mr John
-student1,1234,student,Mary
+username,password,role
+admin,12345,admin,
+teacher1,1234,teacher
+student1,1234,student
