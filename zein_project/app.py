@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import hashlib
 
-st.set_page_config(page_title="School System", layout="wide")
+st.set_page_config(page_title="zein School System", layout="wide")
 
 # =====================================================
 # FILES
