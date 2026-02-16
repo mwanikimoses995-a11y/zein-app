@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from sklearn.linear_model import LinearRegression
 import numpy as np
+import hashlib
 
 st.set_page_config(page_title="School System", layout="wide")
 
@@ -12,20 +13,24 @@ st.set_page_config(page_title="School System", layout="wide")
 USERS_FILE = "users.csv"
 MARKS_FILE = "marks.csv"
 
+# =====================================================
+# PASSWORD HASH FUNCTION
+# =====================================================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # =====================================================
 # CREATE FILES FIRST TIME
 # =====================================================
 if not os.path.exists(USERS_FILE):
     pd.DataFrame([
-        ["admin", "12345", "admin"],
-        ["teacher1", "1234", "teacher"],
-        ["student1", "1234", "student"],
+        ["admin", hash_password("12345"), "admin"],
+        ["teacher1", hash_password("1234"), "teacher"],
+        ["student1", hash_password("1234"), "student"],
     ], columns=["username", "password", "role"]).to_csv(USERS_FILE, index=False)
 
 if not os.path.exists(MARKS_FILE):
     pd.DataFrame(columns=["student", "subject", "marks"]).to_csv(MARKS_FILE, index=False)
-
 
 # =====================================================
 # LOAD DATA
@@ -33,17 +38,14 @@ if not os.path.exists(MARKS_FILE):
 users = pd.read_csv(USERS_FILE)
 marks = pd.read_csv(MARKS_FILE)
 
-
 # =====================================================
 # SAVE FUNCTIONS
 # =====================================================
 def save_users(df):
     df.to_csv(USERS_FILE, index=False)
 
-
 def save_marks(df):
     df.to_csv(MARKS_FILE, index=False)
-
 
 # =====================================================
 # LOGIN SYSTEM
@@ -60,10 +62,11 @@ if "user" not in st.session_state:
         password = st.text_input("Password", type="password").strip()
 
         if st.button("Login"):
+            hashed = hash_password(password)
 
             match = users[
-                (users.username.astype(str) == username) &
-                (users.password.astype(str) == password)
+                (users.username == username) &
+                (users.password == hashed)
             ]
 
             if not match.empty:
@@ -80,15 +83,17 @@ if "user" not in st.session_state:
         answer = st.text_input("Who is zein ?", type="password").strip()
 
         if st.button("Reset Password"):
-            if answer.lower() == "zeinzein":
-                st.success("Password reset to 1234")
-                users.loc[users.username == u, "password"] = "1234"
-                save_users(users)
+            if u in users["username"].values:
+                if answer.lower() == "zeinzein":
+                    users.loc[users.username == u, "password"] = hash_password("1234")
+                    save_users(users)
+                    st.success("Password reset to 1234")
+                else:
+                    st.error("Wrong answer")
             else:
-                st.error("Wrong answer")
+                st.error("Username not found")
 
     st.stop()
-
 
 # =====================================================
 # AFTER LOGIN
@@ -102,7 +107,6 @@ if st.sidebar.button("Logout"):
     del st.session_state.user
     st.rerun()
 
-
 # =====================================================
 # ADMIN PANEL
 # =====================================================
@@ -115,10 +119,15 @@ if role == "admin":
     new_role = st.selectbox("Role", ["teacher", "student", "admin"])
 
     if st.button("Add User"):
-        users.loc[len(users)] = [new_user, new_pass, new_role]
-        save_users(users)
-        st.success("User added successfully!")
-
+        if new_user == "" or new_pass == "":
+            st.warning("Username and password required")
+        elif new_user in users["username"].values:
+            st.error("Username already exists")
+        else:
+            users.loc[len(users)] = [new_user, hash_password(new_pass), new_role]
+            save_users(users)
+            st.success("User added successfully!")
+            st.rerun()
 
 # =====================================================
 # TEACHER PANEL
@@ -127,15 +136,18 @@ elif role == "teacher":
 
     st.header("📤 Upload Student Marks")
 
-    student = st.text_input("Student name")
+    student = st.text_input("Student username")
     subject = st.text_input("Subject")
     mark = st.number_input("Marks", 0, 100)
 
     if st.button("Save Mark"):
-        marks.loc[len(marks)] = [student, subject, mark]
-        save_marks(marks)
-        st.success("Saved!")
-
+        if student == "" or subject == "":
+            st.warning("Fill all fields")
+        else:
+            marks.loc[len(marks)] = [student.strip(), subject.strip(), mark]
+            save_marks(marks)
+            st.success("Saved!")
+            st.rerun()
 
 # =====================================================
 # STUDENT PANEL
@@ -164,6 +176,10 @@ elif role == "student":
             model = LinearRegression()
             model.fit(X, y)
             next_mark = model.predict([[len(y)]])[0]
+
+            # Clamp prediction between 0 and 100
+            next_mark = max(0, min(100, next_mark))
+
             st.success(f"Predicted next mark: {round(next_mark, 1)}")
         else:
             st.info("Need more marks for prediction")
