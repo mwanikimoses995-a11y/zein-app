@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-from sklearn.linear_model import LinearRegression
-import numpy as np
 import hashlib
 
 st.set_page_config(page_title="School System", layout="wide")
@@ -11,87 +9,84 @@ st.set_page_config(page_title="School System", layout="wide")
 # FILES
 # =====================================================
 USERS_FILE = "users.csv"
+STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
+ATTENDANCE_FILE = "attendance.csv"
+RESULTS_FILE = "term_results.csv"
 
 # =====================================================
-# PASSWORD HASH FUNCTION
+# SUBJECT STRUCTURE
+# =====================================================
+COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry"]
+
+HUMANITIES = ["History", "Geography"]          # Choose one
+SCIENCE_OPTION = ["Physics", "CRE"]            # Choose one
+TECH_OPTION = ["Business", "Agriculture", "French",
+               "HomeScience", "Computer"]      # Choose one
+
+ALL_SUBJECTS = COMPULSORY + HUMANITIES + SCIENCE_OPTION + TECH_OPTION
+
+# =====================================================
+# HASH PASSWORD
 # =====================================================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # =====================================================
-# CREATE FILES FIRST TIME
+# CREATE FILES IF NOT EXISTS
 # =====================================================
 if not os.path.exists(USERS_FILE):
     pd.DataFrame([
         ["admin", hash_password("12345"), "admin"],
-        ["teacher1", hash_password("1234"), "teacher"],
-        ["student1", hash_password("1234"), "student"],
+        ["teacher1", hash_password("1234"), "teacher"]
     ], columns=["username", "password", "role"]).to_csv(USERS_FILE, index=False)
+
+if not os.path.exists(STUDENTS_FILE):
+    pd.DataFrame(columns=["student_name"]).to_csv(STUDENTS_FILE, index=False)
 
 if not os.path.exists(MARKS_FILE):
     pd.DataFrame(columns=["student", "subject", "marks"]).to_csv(MARKS_FILE, index=False)
+
+if not os.path.exists(ATTENDANCE_FILE):
+    pd.DataFrame(columns=["student", "attendance_percent"]).to_csv(ATTENDANCE_FILE, index=False)
+
+if not os.path.exists(RESULTS_FILE):
+    pd.DataFrame(columns=["student", "total_marks", "average"]).to_csv(RESULTS_FILE, index=False)
 
 # =====================================================
 # LOAD DATA
 # =====================================================
 users = pd.read_csv(USERS_FILE)
+students = pd.read_csv(STUDENTS_FILE)
 marks = pd.read_csv(MARKS_FILE)
+attendance = pd.read_csv(ATTENDANCE_FILE)
+results = pd.read_csv(RESULTS_FILE)
 
 # =====================================================
 # SAVE FUNCTIONS
 # =====================================================
-def save_users(df):
-    df.to_csv(USERS_FILE, index=False)
-
-def save_marks(df):
-    df.to_csv(MARKS_FILE, index=False)
+def save(df, file):
+    df.to_csv(file, index=False)
 
 # =====================================================
-# LOGIN SYSTEM
+# LOGIN
 # =====================================================
 if "user" not in st.session_state:
 
     st.title("🎓 School Portal Login")
 
-    tab1, tab2 = st.tabs(["Login", "Forgot Password"])
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
-    # ---------------- LOGIN ----------------
-    with tab1:
-        username = st.text_input("Username").strip()
-        password = st.text_input("Password", type="password").strip()
-
-        if st.button("Login"):
-            hashed = hash_password(password)
-
-            match = users[
-                (users.username == username) &
-                (users.password == hashed)
-            ]
-
-            if not match.empty:
-                st.session_state.user = match.iloc[0].to_dict()
-                st.rerun()
-            else:
-                st.error("Wrong username or password")
-
-    # ---------------- FORGOT PASSWORD ----------------
-    with tab2:
-        st.subheader("Security Question")
-
-        u = st.text_input("Enter username").strip()
-        answer = st.text_input("Who is zein ?", type="password").strip()
-
-        if st.button("Reset Password"):
-            if u in users["username"].values:
-                if answer.lower() == "zeinzein":
-                    users.loc[users.username == u, "password"] = hash_password("1234")
-                    save_users(users)
-                    st.success("Password reset to 1234")
-                else:
-                    st.error("Wrong answer")
-            else:
-                st.error("Username not found")
+    if st.button("Login"):
+        hashed = hash_password(password)
+        match = users[(users.username == username) &
+                      (users.password == hashed)]
+        if not match.empty:
+            st.session_state.user = match.iloc[0].to_dict()
+            st.rerun()
+        else:
+            st.error("Wrong credentials")
 
     st.stop()
 
@@ -112,74 +107,140 @@ if st.sidebar.button("Logout"):
 # =====================================================
 if role == "admin":
 
-    st.header("👨‍💼 Admin Panel - Add Users")
+    st.header("👨‍💼 Admin Panel")
 
-    new_user = st.text_input("Username")
-    new_pass = st.text_input("Password")
-    new_role = st.selectbox("Role", ["teacher", "student", "admin"])
+    new_student = st.text_input("Add Student Name")
 
-    if st.button("Add User"):
-        if new_user == "" or new_pass == "":
-            st.warning("Username and password required")
-        elif new_user in users["username"].values:
-            st.error("Username already exists")
-        else:
-            users.loc[len(users)] = [new_user, hash_password(new_pass), new_role]
-            save_users(users)
-            st.success("User added successfully!")
+    if st.button("Add Student"):
+        if new_student != "":
+            students.loc[len(students)] = [new_student]
+            save(students, STUDENTS_FILE)
+            st.success("Student added")
             st.rerun()
+
+    st.subheader("Student List")
+    st.dataframe(students)
 
 # =====================================================
 # TEACHER PANEL
 # =====================================================
 elif role == "teacher":
 
-    st.header("📤 Upload Student Marks")
+    st.header("📋 Teacher Dashboard")
 
-    student = st.text_input("Student username")
-    subject = st.text_input("Subject")
-    mark = st.number_input("Marks", 0, 100)
+    if students.empty:
+        st.warning("No students registered.")
+    else:
 
-    if st.button("Save Mark"):
-        if student == "" or subject == "":
-            st.warning("Fill all fields")
-        else:
-            marks.loc[len(marks)] = [student.strip(), subject.strip(), mark]
-            save_marks(marks)
-            st.success("Saved!")
+        selected_student = st.selectbox(
+            "Select Student", students["student_name"])
+
+        st.subheader("📚 Subject Selection")
+
+        human_choice = st.selectbox(
+            "Choose ONE: History or Geography", HUMANITIES)
+
+        science_choice = st.selectbox(
+            "Choose ONE: Physics or CRE", SCIENCE_OPTION)
+
+        tech_choice = st.selectbox(
+            "Choose ONE: Business, Agriculture, French, HomeScience or Computer", TECH_OPTION)
+
+        selected_subjects = COMPULSORY + \
+            [human_choice, science_choice, tech_choice]
+
+        st.subheader("✏️ Enter / Edit Marks")
+
+        for subject in selected_subjects:
+
+            existing = marks[(marks.student == selected_student) &
+                             (marks.subject == subject)]
+
+            current_mark = int(existing.marks.values[0]) if not existing.empty else 0
+
+            new_mark = st.number_input(
+                f"{subject}", 0, 100, current_mark, key=subject)
+
+            if not existing.empty:
+                marks.loc[(marks.student == selected_student) &
+                          (marks.subject == subject), "marks"] = new_mark
+            else:
+                marks.loc[len(marks)] = [
+                    selected_student, subject, new_mark]
+
+        if st.button("Save Marks"):
+            save(marks, MARKS_FILE)
+            st.success("Marks saved successfully")
             st.rerun()
 
+        # =====================================================
+        # ATTENDANCE
+        # =====================================================
+        st.subheader("📅 Attendance")
+
+        existing_att = attendance[attendance.student == selected_student]
+
+        current_att = int(
+            existing_att.attendance_percent.values[0]) if not existing_att.empty else 0
+
+        att_value = st.number_input(
+            "Attendance Percentage", 0, 100, current_att)
+
+        if st.button("Save Attendance"):
+            if not existing_att.empty:
+                attendance.loc[attendance.student ==
+                               selected_student, "attendance_percent"] = att_value
+            else:
+                attendance.loc[len(attendance)] = [
+                    selected_student, att_value]
+            save(attendance, ATTENDANCE_FILE)
+            st.success("Attendance updated")
+            st.rerun()
+
+        # =====================================================
+        # TERM RESULTS
+        # =====================================================
+        st.subheader("📊 Term Results")
+
+        student_marks = marks[marks.student == selected_student]
+
+        if not student_marks.empty:
+            total = student_marks.marks.sum()
+            average = round(student_marks.marks.mean(), 2)
+
+            st.write(f"Total Marks: {total}")
+            st.write(f"Average: {average}")
+
+            if st.button("Save Term Results"):
+                results = results[results.student != selected_student]
+                results.loc[len(results)] = [
+                    selected_student, total, average]
+                save(results, RESULTS_FILE)
+                st.success("Term results saved")
+
+            st.dataframe(student_marks)
+
 # =====================================================
-# STUDENT PANEL
+# STUDENT VIEW
 # =====================================================
 elif role == "student":
 
-    st.header("📊 My Marks")
+    st.header("📊 My Results")
 
-    student_marks = marks[marks.student == user["username"]]
+    student_name = user["username"]
 
-    if student_marks.empty:
-        st.info("No marks yet")
-    else:
+    student_marks = marks[marks.student == student_name]
+    student_result = results[results.student == student_name]
+    student_att = attendance[attendance.student == student_name]
+
+    if not student_marks.empty:
         st.dataframe(student_marks)
-
-        # Chart
         st.bar_chart(student_marks.set_index("subject")["marks"])
 
-        # ---------------- AI PREDICTION ----------------
-        st.subheader("🤖 AI Performance Prediction")
+    if not student_result.empty:
+        st.subheader("Term Summary")
+        st.write(student_result)
 
-        X = np.arange(len(student_marks)).reshape(-1, 1)
-        y = student_marks["marks"].values
-
-        if len(y) > 1:
-            model = LinearRegression()
-            model.fit(X, y)
-            next_mark = model.predict([[len(y)]])[0]
-
-            # Clamp prediction between 0 and 100
-            next_mark = max(0, min(100, next_mark))
-
-            st.success(f"Predicted next mark: {round(next_mark, 1)}")
-        else:
-            st.info("Need more marks for prediction")
+    if not student_att.empty:
+        st.subheader("Attendance")
+        st.write(student_att)
