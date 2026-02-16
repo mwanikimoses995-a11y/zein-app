@@ -18,22 +18,18 @@ RESULTS_FILE = "term_results.csv"
 # SUBJECT STRUCTURE
 # =====================================================
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry"]
-
-HUMANITIES = ["History", "Geography"]          # Choose one
-SCIENCE_OPTION = ["Physics", "CRE"]            # Choose one
-TECH_OPTION = ["Business", "Agriculture", "French",
-               "HomeScience", "Computer"]      # Choose one
-
-ALL_SUBJECTS = COMPULSORY + HUMANITIES + SCIENCE_OPTION + TECH_OPTION
+HUMANITIES = ["History", "Geography"]
+SCIENCE_OPTION = ["Physics", "CRE"]
+TECH_OPTION = ["Business", "Agriculture", "French", "HomeScience", "Computer"]
 
 # =====================================================
-# HASH PASSWORD
+# PASSWORD HASH
 # =====================================================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # =====================================================
-# CREATE FILES IF NOT EXISTS
+# CREATE FILES IF NOT EXIST
 # =====================================================
 if not os.path.exists(USERS_FILE):
     pd.DataFrame([
@@ -62,31 +58,55 @@ marks = pd.read_csv(MARKS_FILE)
 attendance = pd.read_csv(ATTENDANCE_FILE)
 results = pd.read_csv(RESULTS_FILE)
 
-# =====================================================
-# SAVE FUNCTIONS
-# =====================================================
 def save(df, file):
     df.to_csv(file, index=False)
 
 # =====================================================
-# LOGIN
+# LOGIN + FORGOT PASSWORD
 # =====================================================
 if "user" not in st.session_state:
 
     st.title("🎓 School Portal Login")
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    tab1, tab2 = st.tabs(["Login", "Forgot Password"])
 
-    if st.button("Login"):
-        hashed = hash_password(password)
-        match = users[(users.username == username) &
-                      (users.password == hashed)]
-        if not match.empty:
-            st.session_state.user = match.iloc[0].to_dict()
-            st.rerun()
-        else:
-            st.error("Wrong credentials")
+    # ---------------- LOGIN ----------------
+    with tab1:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            hashed = hash_password(password)
+
+            match = users[
+                (users.username == username) &
+                (users.password == hashed)
+            ]
+
+            if not match.empty:
+                st.session_state.user = match.iloc[0].to_dict()
+                st.rerun()
+            else:
+                st.error("Wrong username or password")
+
+    # ---------------- FORGOT PASSWORD ----------------
+    with tab2:
+        st.subheader("Security Question")
+
+        reset_user = st.text_input("Enter your username")
+        answer = st.text_input("Who is zein ?", type="password")
+
+        if st.button("Reset Password"):
+            if reset_user in users["username"].values:
+                if answer.strip().lower() == "zeiniszein":
+                    users.loc[users.username == reset_user,
+                              "password"] = hash_password("1234")
+                    save(users, USERS_FILE)
+                    st.success("Password reset to default: 1234")
+                else:
+                    st.error("Incorrect security answer")
+            else:
+                st.error("Username not found")
 
     st.stop()
 
@@ -112,8 +132,8 @@ if role == "admin":
     new_student = st.text_input("Add Student Name")
 
     if st.button("Add Student"):
-        if new_student != "":
-            students.loc[len(students)] = [new_student]
+        if new_student.strip() != "":
+            students.loc[len(students)] = [new_student.strip()]
             save(students, STUDENTS_FILE)
             st.success("Student added")
             st.rerun()
@@ -135,8 +155,7 @@ elif role == "teacher":
         selected_student = st.selectbox(
             "Select Student", students["student_name"])
 
-        st.subheader("📚 Subject Selection")
-
+        # SUBJECT SELECTION RULES
         human_choice = st.selectbox(
             "Choose ONE: History or Geography", HUMANITIES)
 
@@ -159,7 +178,7 @@ elif role == "teacher":
             current_mark = int(existing.marks.values[0]) if not existing.empty else 0
 
             new_mark = st.number_input(
-                f"{subject}", 0, 100, current_mark, key=subject)
+                f"{subject}", 0, 100, current_mark, key=f"{selected_student}_{subject}")
 
             if not existing.empty:
                 marks.loc[(marks.student == selected_student) &
@@ -173,15 +192,11 @@ elif role == "teacher":
             st.success("Marks saved successfully")
             st.rerun()
 
-        # =====================================================
         # ATTENDANCE
-        # =====================================================
         st.subheader("📅 Attendance")
 
         existing_att = attendance[attendance.student == selected_student]
-
-        current_att = int(
-            existing_att.attendance_percent.values[0]) if not existing_att.empty else 0
+        current_att = int(existing_att.attendance_percent.values[0]) if not existing_att.empty else 0
 
         att_value = st.number_input(
             "Attendance Percentage", 0, 100, current_att)
@@ -197,9 +212,7 @@ elif role == "teacher":
             st.success("Attendance updated")
             st.rerun()
 
-        # =====================================================
         # TERM RESULTS
-        # =====================================================
         st.subheader("📊 Term Results")
 
         student_marks = marks[marks.student == selected_student]
