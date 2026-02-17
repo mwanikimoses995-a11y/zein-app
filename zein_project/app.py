@@ -51,7 +51,7 @@ create_file(ATTENDANCE_FILE, ["student", "attendance_percent"])
 create_file(RESULTS_FILE, ["student", "total_marks", "average", "grade"])
 
 # =====================================================
-# LOAD DATA
+# LOAD & SAVE
 # =====================================================
 def load_all():
     return (
@@ -76,12 +76,17 @@ def calculate_grade(avg):
     else: return "E"
 
 # =====================================================
-# LOGIN
+# LOAD DATA
 # =====================================================
 users, students, marks, attendance, results = load_all()
 
+# =====================================================
+# LOGIN + FORGOT PASSWORD
+# =====================================================
 if "user" not in st.session_state:
+
     st.title("🎓 School Portal Login")
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
@@ -93,8 +98,32 @@ if "user" not in st.session_state:
             st.rerun()
         else:
             st.error("Wrong username or password")
+
+    st.divider()
+    st.subheader("Forgot Password")
+
+    fp_username = st.text_input("Enter Username for Reset")
+
+    if st.button("Reset Password"):
+        if fp_username in users.username.values:
+
+            answer = st.text_input("Security Question: Who is zein?")
+
+            if st.button("Submit Answer"):
+                if answer.strip().lower() == "zein is zein":
+                    users.loc[users.username == fp_username, "password"] = hash_password("1234")
+                    save(users, USERS_FILE)
+                    st.success("Password reset to default: 1234")
+                else:
+                    st.error("Wrong answer.")
+        else:
+            st.error("Username not found.")
+
     st.stop()
 
+# =====================================================
+# SESSION
+# =====================================================
 user = st.session_state.user
 role = user["role"]
 
@@ -110,6 +139,7 @@ users, students, marks, attendance, results = load_all()
 # ADMIN PANEL
 # =====================================================
 if role == "admin":
+
     st.header("👨‍💼 Admin Panel")
 
     tab1, tab2 = st.tabs(["Add User", "Remove User"])
@@ -136,7 +166,7 @@ if role == "admin":
                     st.rerun()
 
         else:
-            subject = st.selectbox("Assign Subject", ALL_SUBJECTS)
+            subject = st.selectbox("Assign Subject (optional)", ALL_SUBJECTS)
             number = st.number_input("Teacher Number", min_value=1, step=1)
 
             if st.button("Add Teacher"):
@@ -149,12 +179,13 @@ if role == "admin":
                         columns=users.columns,
                     )
                     save(pd.concat([users, new_user], ignore_index=True), USERS_FILE)
-                    st.success(f"Teacher added for {subject}")
+                    st.success("Teacher added")
                     st.rerun()
 
     with tab2:
         removable = users[users.role != "admin"]
         selected = st.selectbox("Select user", removable.username)
+
         if st.button("Delete"):
             save(users[users.username != selected], USERS_FILE)
             save(students[students.student_name != selected], STUDENTS_FILE)
@@ -168,38 +199,36 @@ if role == "admin":
     st.dataframe(users)
 
 # =====================================================
-# TEACHER PANEL (FULL SYSTEM)
+# TEACHER PANEL (UNLOCKED SUBJECTS)
 # =====================================================
 elif role == "teacher":
-    teacher_subject = user["subject"]
-    st.header(f"👩‍🏫 Teacher Dashboard - {teacher_subject}")
+
+    st.header("👩‍🏫 Teacher Dashboard")
 
     st.subheader("Enter Marks")
 
     if students.empty:
         st.warning("No students available.")
     else:
-        student_list = students["student_name"].tolist()
-        selected_student = st.selectbox("Select Student", student_list)
+        selected_student = st.selectbox("Select Student", students["student_name"])
+        selected_subject = st.selectbox("Select Subject", ALL_SUBJECTS)
         mark = st.number_input("Enter Marks (0-100)", min_value=0, max_value=100)
 
         if st.button("Save Marks"):
 
-            # Remove existing mark for same subject
             marks = marks[
                 ~((marks.student == selected_student) &
-                  (marks.subject == teacher_subject))
+                  (marks.subject == selected_subject))
             ]
 
             new_mark = pd.DataFrame(
-                [[selected_student, teacher_subject, mark]],
+                [[selected_student, selected_subject, mark]],
                 columns=marks.columns
             )
 
             marks = pd.concat([marks, new_mark], ignore_index=True)
             save(marks, MARKS_FILE)
 
-            # ==== AUTOMATIC RESULT CALCULATION ====
             student_marks = marks[marks.student == selected_student]
             total = student_marks["marks"].sum()
             average = student_marks["marks"].mean()
@@ -215,7 +244,7 @@ elif role == "teacher":
             results = pd.concat([results, new_result], ignore_index=True)
             save(results, RESULTS_FILE)
 
-            st.success("Marks saved & results updated automatically ✅")
+            st.success("Marks saved & results updated ✅")
             st.rerun()
 
     st.divider()
@@ -239,6 +268,7 @@ elif role == "teacher":
 # STUDENT PANEL
 # =====================================================
 elif role == "student":
+
     st.header(f"📊 Results for {user['username']}")
 
     student_name = user["username"]
