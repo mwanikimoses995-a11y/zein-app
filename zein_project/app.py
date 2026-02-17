@@ -113,16 +113,43 @@ if st.sidebar.button("Logout"):
 users, students, marks, attendance, results = load_all()
 
 # =====================================================
-# TEACHER PANEL (UPLOAD & SAVE ONCE)
+# TEACHER PANEL
 # =====================================================
 if role == "teacher":
 
     st.header("👩‍🏫 Teacher Dashboard")
 
-    st.subheader("📤 Upload Marks (Bulk)")
+    st.subheader("📥 Step 1: Download Template")
+
+    # Create template dataframe
+    template_df = pd.DataFrame({
+        "student": ["student_username"],
+        "subject": ["English"],
+        "marks": [75]
+    })
+
+    st.download_button(
+        label="Download CSV Template",
+        data=template_df.to_csv(index=False),
+        file_name="marks_template.csv",
+        mime="text/csv"
+    )
+
+    st.info("""
+    📌 Instructions:
+    1. Download the template.
+    2. Fill in student usernames exactly as registered.
+    3. Subject must match available subjects.
+    4. Marks must be between 0 and 100.
+    5. A student can have MAXIMUM 8 subjects only.
+    6. Save the file as CSV.
+    7. Upload below and click 'Save Uploaded Marks'.
+    """)
+
+    st.subheader("📤 Step 2: Upload Completed CSV")
 
     uploaded_file = st.file_uploader(
-        "Upload CSV with columns: student, subject, marks",
+        "Upload CSV (student, subject, marks)",
         type=["csv"]
     )
 
@@ -141,40 +168,56 @@ if role == "teacher":
 
                 if st.button("Save Uploaded Marks"):
 
-                    # Remove old entries for same student & subject
-                    for _, row in uploaded_df.iterrows():
-                        marks = marks[
-                            ~((marks.student == row["student"]) &
-                              (marks.subject == row["subject"]))
-                        ]
+                    error_flag = False
 
-                    # Append new data
-                    marks = pd.concat([marks, uploaded_df], ignore_index=True)
-                    save(marks, MARKS_FILE)
+                    for student in uploaded_df["student"].unique():
 
-                    # Update results for affected students
-                    affected_students = uploaded_df["student"].unique()
+                        existing_subjects = marks[marks.student == student]["subject"].nunique()
+                        new_subjects = uploaded_df[uploaded_df.student == student]["subject"].nunique()
 
-                    for student in affected_students:
-                        student_marks = marks[marks.student == student]
-
-                        total = student_marks["marks"].sum()
-                        average = student_marks["marks"].mean()
-                        grade = calculate_grade(average)
-
-                        results = results[results.student != student]
-
-                        new_result = pd.DataFrame(
-                            [[student, total, round(average, 2), grade]],
-                            columns=results.columns
+                        total_subjects = len(
+                            set(marks[marks.student == student]["subject"])
+                            | set(uploaded_df[uploaded_df.student == student]["subject"])
                         )
 
-                        results = pd.concat([results, new_result], ignore_index=True)
+                        if total_subjects > 8:
+                            st.error(f"{student} exceeds 8 subjects limit ❌")
+                            error_flag = True
 
-                    save(results, RESULTS_FILE)
+                    if not error_flag:
 
-                    st.success("All marks saved & results updated ✅")
-                    st.rerun()
+                        # Remove duplicates for same student/subject
+                        for _, row in uploaded_df.iterrows():
+                            marks = marks[
+                                ~((marks.student == row["student"]) &
+                                  (marks.subject == row["subject"]))
+                            ]
+
+                        marks = pd.concat([marks, uploaded_df], ignore_index=True)
+                        save(marks, MARKS_FILE)
+
+                        # Update results
+                        for student in uploaded_df["student"].unique():
+
+                            student_marks = marks[marks.student == student]
+
+                            total = student_marks["marks"].sum()
+                            average = student_marks["marks"].mean()
+                            grade = calculate_grade(average)
+
+                            results = results[results.student != student]
+
+                            new_result = pd.DataFrame(
+                                [[student, total, round(average, 2), grade]],
+                                columns=results.columns
+                            )
+
+                            results = pd.concat([results, new_result], ignore_index=True)
+
+                        save(results, RESULTS_FILE)
+
+                        st.success("All marks saved successfully ✅")
+                        st.rerun()
 
         except Exception as e:
             st.error(f"Error reading file: {e}")
@@ -190,7 +233,6 @@ elif role == "student":
 
     student_marks = marks[marks.student == student_name]
     student_result = results[results.student == student_name]
-    student_att = attendance[attendance.student == student_name]
 
     if not student_marks.empty:
         st.subheader("Subject Marks")
@@ -201,9 +243,6 @@ elif role == "student":
         st.metric("Total Marks", student_result.iloc[0]["total_marks"])
         st.metric("Average", student_result.iloc[0]["average"])
         st.metric("Grade", student_result.iloc[0]["grade"])
-
-    if not student_att.empty:
-        st.metric("Attendance", f"{student_att.iloc[0]['attendance_percent']}%")
 
     if len(student_marks) > 1:
         X = np.arange(len(student_marks)).reshape(-1, 1)
