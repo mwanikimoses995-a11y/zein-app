@@ -4,7 +4,6 @@ import os
 import hashlib
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
 
