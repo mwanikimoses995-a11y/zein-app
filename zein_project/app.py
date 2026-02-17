@@ -24,6 +24,8 @@ HUMANITIES = ["History", "Geography"]
 SCIENCE_OPTION = ["Physics", "CRE"]
 TECH_OPTION = ["Business", "Agriculture", "French", "HomeScience", "Computer"]
 
+ALL_SUBJECTS = COMPULSORY + HUMANITIES + SCIENCE_OPTION + TECH_OPTION
+
 # =====================================================
 # PASSWORD HASH
 # =====================================================
@@ -31,14 +33,18 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # =====================================================
-# CREATE FILES IF NOT EXIST
+# CREATE FILES
 # =====================================================
 def create_file(file, columns, data=None):
     if not os.path.exists(file):
         pd.DataFrame(data if data else [], columns=columns).to_csv(file, index=False)
 
-create_file(USERS_FILE, ["username", "password", "role"],
-            [["admin", hash_password("12345"), "admin"]])
+create_file(
+    USERS_FILE,
+    ["username", "password", "role", "subject"],
+    [["admin", hash_password("12345"), "admin", ""]],
+)
+
 create_file(STUDENTS_FILE, ["student_name"])
 create_file(MARKS_FILE, ["student", "subject", "marks"])
 create_file(ATTENDANCE_FILE, ["student", "attendance_percent"])
@@ -47,7 +53,7 @@ create_file(RESULTS_FILE, ["student", "total_marks", "average", "grade"])
 # =====================================================
 # LOAD DATA
 # =====================================================
-def load_all_data():
+def load_all():
     return (
         pd.read_csv(USERS_FILE),
         pd.read_csv(STUDENTS_FILE),
@@ -56,24 +62,24 @@ def load_all_data():
         pd.read_csv(RESULTS_FILE),
     )
 
-users, students, marks, attendance, results = load_all_data()
-
 def save(df, file):
     df.to_csv(file, index=False)
 
 # =====================================================
 # GRADE FUNCTION
 # =====================================================
-def calculate_grade(mark):
-    if mark >= 80: return "A"
-    elif mark >= 70: return "B"
-    elif mark >= 60: return "C"
-    elif mark >= 50: return "D"
+def calculate_grade(avg):
+    if avg >= 80: return "A"
+    elif avg >= 70: return "B"
+    elif avg >= 60: return "C"
+    elif avg >= 50: return "D"
     else: return "E"
 
 # =====================================================
 # LOGIN
 # =====================================================
+users, students, marks, attendance, results = load_all()
+
 if "user" not in st.session_state:
     st.title("🎓 School Portal Login")
     username = st.text_input("Username")
@@ -89,9 +95,6 @@ if "user" not in st.session_state:
             st.error("Wrong username or password")
     st.stop()
 
-# =====================================================
-# AFTER LOGIN
-# =====================================================
 user = st.session_state.user
 role = user["role"]
 
@@ -101,110 +104,167 @@ if st.sidebar.button("Logout"):
     del st.session_state.user
     st.rerun()
 
+users, students, marks, attendance, results = load_all()
+
 # =====================================================
 # ADMIN PANEL
 # =====================================================
 if role == "admin":
     st.header("👨‍💼 Admin Panel")
+
     tab1, tab2 = st.tabs(["Add User", "Remove User"])
 
     with tab1:
         option = st.radio("Add", ["Student", "Teacher"])
+
         if option == "Student":
             name = st.text_input("Student Name")
             if st.button("Add Student"):
                 username = name.replace(" ", "").lower()
                 if username in users.username.values:
-                    st.warning("User already exists")
+                    st.warning("User exists")
                 else:
-                    new_user = pd.DataFrame([[username, hash_password("1234"), "student"]], columns=users.columns)
+                    new_user = pd.DataFrame(
+                        [[username, hash_password("1234"), "student", ""]],
+                        columns=users.columns,
+                    )
                     new_student = pd.DataFrame([[username]], columns=students.columns)
-                    save(pd.concat([users, new_user]), USERS_FILE)
-                    save(pd.concat([students, new_student]), STUDENTS_FILE)
-                    st.success(f"Student {username} added with default password '1234'")
+
+                    save(pd.concat([users, new_user], ignore_index=True), USERS_FILE)
+                    save(pd.concat([students, new_student], ignore_index=True), STUDENTS_FILE)
+                    st.success("Student added")
                     st.rerun()
+
         else:
-            subject = st.selectbox("Subject", COMPULSORY + HUMANITIES + SCIENCE_OPTION + TECH_OPTION)
-            number = st.number_input("Teacher Number", 1)
+            subject = st.selectbox("Assign Subject", ALL_SUBJECTS)
+            number = st.number_input("Teacher Number", min_value=1, step=1)
+
             if st.button("Add Teacher"):
                 username = f"{subject.lower()}{int(number)}"
                 if username in users.username.values:
                     st.warning("User exists")
                 else:
-                    new_user = pd.DataFrame([[username, hash_password("1234"), "teacher"]], columns=users.columns)
-                    save(pd.concat([users, new_user]), USERS_FILE)
-                    st.success(f"Teacher {username} added")
+                    new_user = pd.DataFrame(
+                        [[username, hash_password("1234"), "teacher", subject]],
+                        columns=users.columns,
+                    )
+                    save(pd.concat([users, new_user], ignore_index=True), USERS_FILE)
+                    st.success(f"Teacher added for {subject}")
                     st.rerun()
 
     with tab2:
         removable = users[users.role != "admin"]
-        if not removable.empty:
-            selected_user = st.selectbox("Select user to remove", removable.username)
-            if st.button("Delete User"):
-                # Filtering out the user from all dataframes
-                save(users[users.username != selected_user], USERS_FILE)
-                save(students[students.student_name != selected_user], STUDENTS_FILE)
-                save(marks[marks.student != selected_user], MARKS_FILE)
-                save(attendance[attendance.student != selected_user], ATTENDANCE_FILE)
-                save(results[results.student != selected_user], RESULTS_FILE)
-                st.success(f"User {selected_user} deleted")
-                st.rerun()
-        else:
-            st.info("No users available to remove.")
+        selected = st.selectbox("Select user", removable.username)
+        if st.button("Delete"):
+            save(users[users.username != selected], USERS_FILE)
+            save(students[students.student_name != selected], STUDENTS_FILE)
+            save(marks[marks.student != selected], MARKS_FILE)
+            save(attendance[attendance.student != selected], ATTENDANCE_FILE)
+            save(results[results.student != selected], RESULTS_FILE)
+            st.success("User removed")
+            st.rerun()
 
-    st.subheader("Current Users")
-    st.dataframe(users, use_container_width=True)
+    st.subheader("All Users")
+    st.dataframe(users)
+
+# =====================================================
+# TEACHER PANEL (FULL SYSTEM)
+# =====================================================
+elif role == "teacher":
+    teacher_subject = user["subject"]
+    st.header(f"👩‍🏫 Teacher Dashboard - {teacher_subject}")
+
+    st.subheader("Enter Marks")
+
+    if students.empty:
+        st.warning("No students available.")
+    else:
+        student_list = students["student_name"].tolist()
+        selected_student = st.selectbox("Select Student", student_list)
+        mark = st.number_input("Enter Marks (0-100)", min_value=0, max_value=100)
+
+        if st.button("Save Marks"):
+
+            # Remove existing mark for same subject
+            marks = marks[
+                ~((marks.student == selected_student) &
+                  (marks.subject == teacher_subject))
+            ]
+
+            new_mark = pd.DataFrame(
+                [[selected_student, teacher_subject, mark]],
+                columns=marks.columns
+            )
+
+            marks = pd.concat([marks, new_mark], ignore_index=True)
+            save(marks, MARKS_FILE)
+
+            # ==== AUTOMATIC RESULT CALCULATION ====
+            student_marks = marks[marks.student == selected_student]
+            total = student_marks["marks"].sum()
+            average = student_marks["marks"].mean()
+            grade = calculate_grade(average)
+
+            results = results[results.student != selected_student]
+
+            new_result = pd.DataFrame(
+                [[selected_student, total, round(average, 2), grade]],
+                columns=results.columns
+            )
+
+            results = pd.concat([results, new_result], ignore_index=True)
+            save(results, RESULTS_FILE)
+
+            st.success("Marks saved & results updated automatically ✅")
+            st.rerun()
+
+    st.divider()
+    st.subheader("Enter Attendance")
+
+    selected_student_att = st.selectbox("Select Student for Attendance", students["student_name"])
+    attendance_percent = st.number_input("Attendance %", min_value=0, max_value=100)
+
+    if st.button("Save Attendance"):
+        attendance = attendance[attendance.student != selected_student_att]
+        new_att = pd.DataFrame(
+            [[selected_student_att, attendance_percent]],
+            columns=attendance.columns
+        )
+        attendance = pd.concat([attendance, new_att], ignore_index=True)
+        save(attendance, ATTENDANCE_FILE)
+        st.success("Attendance saved ✅")
+        st.rerun()
 
 # =====================================================
 # STUDENT PANEL
 # =====================================================
 elif role == "student":
     st.header(f"📊 Results for {user['username']}")
+
     student_name = user["username"]
 
     student_marks = marks[marks.student == student_name]
     student_result = results[results.student == student_name]
     student_att = attendance[attendance.student == student_name]
 
-    col1, col2 = st.columns(2)
+    if not student_marks.empty:
+        st.subheader("Subject Marks")
+        st.table(student_marks)
+        st.bar_chart(student_marks.set_index("subject")["marks"])
 
-    with col1:
-        if not student_marks.empty:
-            st.subheader("Subject Marks")
-            st.table(student_marks)
-        else:
-            st.info("No marks recorded yet.")
+    if not student_result.empty:
+        st.metric("Total Marks", student_result.iloc[0]["total_marks"])
+        st.metric("Average", student_result.iloc[0]["average"])
+        st.metric("Grade", student_result.iloc[0]["grade"])
 
-    with col2:
-        if not student_marks.empty:
-            st.subheader("Performance Trend")
-            st.bar_chart(student_marks.set_index("subject")["marks"])
-
-    if not student_result.empty or not student_att.empty:
-        st.divider()
-        c3, c4 = st.columns(2)
-        with c3:
-            if not student_result.empty:
-                st.metric("Final Grade", student_result.iloc[0]['grade'])
-                st.metric("Total Marks", student_result.iloc[0]['total_marks'])
-        with c4:
-            if not student_att.empty:
-                st.metric("Attendance", f"{student_att.iloc[0]['attendance_percent']}%")
+    if not student_att.empty:
+        st.metric("Attendance", f"{student_att.iloc[0]['attendance_percent']}%")
 
     # Prediction
     if len(student_marks) > 1:
-        st.divider()
         X = np.arange(len(student_marks)).reshape(-1, 1)
         y = student_marks["marks"].values
         model = LinearRegression()
         model.fit(X, y)
         prediction = model.predict([[len(y)]])[0]
-        st.info(f"📈 Based on your current trend, your predicted next mark is: **{round(prediction, 1)}**")
-
-# =====================================================
-# TEACHER PANEL (Placeholder for logic if needed)
-# =====================================================
-elif role == "teacher":
-    st.header("👩‍🏫 Teacher Dashboard")
-    st.write(f"Subject: {user['username']}")
-    st.info("Teacher mark entry logic can be implemented here.")
+        st.info(f"📈 Predicted next mark: {round(prediction,1)}")
