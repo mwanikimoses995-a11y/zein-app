@@ -79,24 +79,46 @@ def calculate_grade(avg):
 users, students, marks, attendance, results = load_all()
 
 # =====================================================
-# LOGIN
+# LOGIN / FORGOT PASSWORD
 # =====================================================
 if "user" not in st.session_state:
 
     st.title("🎓 School Portal Login")
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    forgot_pw = st.checkbox("Forgot Password?")
 
-    if st.button("Login"):
-        hashed = hash_password(password)
-        match = users[(users.username == username) & (users.password == hashed)]
-        if not match.empty:
-            st.session_state.user = match.iloc[0].to_dict()
-            st.rerun()
-        else:
-            st.error("Wrong username or password")
-    st.stop()
+    if forgot_pw:
+        username = st.text_input("Enter Username")
+        sec_answer = st.text_input("Security Question: Who is Zein?")
+        if st.button("Reset Password"):
+            user_match = users[users.username == username]
+            if user_match.empty:
+                st.error("Username not found")
+            elif sec_answer.strip().lower() == "zeiniszein":
+                new_password = st.text_input("Enter New Password", type="password")
+                confirm_password = st.text_input("Confirm New Password", type="password")
+                if new_password and confirm_password:
+                    if new_password == confirm_password:
+                        users.loc[users.username == username, "password"] = hash_password(new_password)
+                        save(users, USERS_FILE)
+                        st.success("Password reset successfully! You can now login.")
+                    else:
+                        st.error("Passwords do not match")
+            else:
+                st.error("Incorrect answer to security question")
+        st.stop()
+    else:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            hashed = hash_password(password)
+            match = users[(users.username == username) & (users.password == hashed)]
+            if not match.empty:
+                st.session_state.user = match.iloc[0].to_dict()
+                st.rerun()
+            else:
+                st.error("Wrong username or password")
+        st.stop()
 
 user = st.session_state.user
 role = user["role"]
@@ -112,7 +134,6 @@ users, students, marks, attendance, results = load_all()
 # TEACHER PANEL
 # =====================================================
 if role == "teacher":
-
     st.header("👩‍🏫 Teacher Dashboard")
 
     if students.empty:
@@ -121,31 +142,18 @@ if role == "teacher":
 
         tab1, tab2 = st.tabs(["Manual Entry", "Upload CSV"])
 
-        # ============================
-        # TAB 1: Manual Entry
-        # ============================
+        # ======== TAB 1: Manual Entry ========
         with tab1:
 
-            selected_student = st.selectbox(
-                "Select Student",
-                students["student_name"],
-                key="manual_student_select"
-            )
-
+            selected_student = st.selectbox("Select Student", students["student_name"], key="manual_student_select")
             st.divider()
             st.subheader("Enter Student Subjects & Marks")
-
             student_data = []
 
             # COMPULSORY SUBJECTS
             st.markdown("### 📘 Compulsory Subjects (All Required)")
             for subject in COMPULSORY:
-                mark = st.number_input(
-                    f"{subject} Marks",
-                    min_value=0,
-                    max_value=100,
-                    key=f"{selected_student}_{subject}"
-                )
+                mark = st.number_input(f"{subject} Marks", min_value=0, max_value=100, key=f"{selected_student}_{subject}")
                 student_data.append((subject, mark))
 
             # GROUP 1
@@ -169,11 +177,8 @@ if role == "teacher":
             if st.button("Save Student Marks (Manual Entry)"):
                 # Remove old records for this student
                 marks = marks[marks.student != selected_student]
-
-                # Add new records
                 for subject, mark in student_data:
-                    new_row = pd.DataFrame([[selected_student, subject, mark]], columns=marks.columns)
-                    marks = pd.concat([marks, new_row], ignore_index=True)
+                    marks = pd.concat([marks, pd.DataFrame([[selected_student, subject, mark]], columns=marks.columns)], ignore_index=True)
                 save(marks, MARKS_FILE)
 
                 # Recalculate results
@@ -181,33 +186,23 @@ if role == "teacher":
                 total = student_marks["marks"].sum()
                 average = student_marks["marks"].mean()
                 grade = calculate_grade(average)
-
                 results = results[results.student != selected_student]
-                new_result = pd.DataFrame([[selected_student, total, round(average, 2), grade]], columns=results.columns)
-                results = pd.concat([results, new_result], ignore_index=True)
+                results = pd.concat([results, pd.DataFrame([[selected_student, total, round(average,2), grade]], columns=results.columns)], ignore_index=True)
                 save(results, RESULTS_FILE)
 
                 st.success("Marks saved successfully ✅")
-                st.rerun()
+                st.rerun()  # refresh so student panel sees updated marks
 
-        # ============================
-        # TAB 2: CSV Upload
-        # ============================
+        # ======== TAB 2: CSV Upload ========
         with tab2:
-
             st.subheader("📥 Step 1: Download CSV Template")
             template_rows = []
             for student in students["student_name"]:
                 for subj in COMPULSORY + [GROUP_1[0], GROUP_2[0], GROUP_3[0]]:
                     template_rows.append([student, subj, 0])
-            template_df = pd.DataFrame(template_rows, columns=["student", "subject", "marks"])
+            template_df = pd.DataFrame(template_rows, columns=["student","subject","marks"])
 
-            st.download_button(
-                label="Download CSV Template",
-                data=template_df.to_csv(index=False),
-                file_name="marks_template.csv",
-                mime="text/csv"
-            )
+            st.download_button("Download CSV Template", data=template_df.to_csv(index=False), file_name="marks_template.csv", mime="text/csv")
 
             st.info("""
             📌 Instructions:
@@ -216,83 +211,65 @@ if role == "teacher":
             3. Subject must match available subjects.
             4. Marks must be between 0 and 100.
             5. Each student can have MAXIMUM 8 subjects following subject group rules.
-            6. Save the file as CSV.
-            7. Upload below and click 'Save Uploaded Marks'.
+            6. Save as CSV and upload below.
             """)
 
             st.subheader("📤 Step 2: Upload Completed CSV")
             uploaded_file = st.file_uploader("Upload CSV (student, subject, marks)", type=["csv"])
-
-            if uploaded_file is not None:
+            if uploaded_file:
                 try:
                     uploaded_df = pd.read_csv(uploaded_file)
-                    required_columns = {"student", "subject", "marks"}
-                    if not required_columns.issubset(uploaded_df.columns):
-                        st.error("CSV must contain: student, subject, marks")
+                    if not {"student","subject","marks"}.issubset(uploaded_df.columns):
+                        st.error("CSV must contain student, subject, marks")
                     else:
-                        st.success("File uploaded successfully ✅")
+                        st.success("File uploaded ✅")
                         st.dataframe(uploaded_df)
 
                         if st.button("Save Uploaded Marks (CSV)"):
-
                             error_flag = False
-
-                            # Validate subject groups and max 8 subjects
                             for student in uploaded_df["student"].unique():
-                                student_df = uploaded_df[uploaded_df.student == student]
-                                subjects = student_df["subject"].tolist()
-
+                                s_df = uploaded_df[uploaded_df.student==student]
+                                subjects = s_df.subject.tolist()
                                 if len(subjects) > 8:
-                                    st.error(f"{student} exceeds 8 subjects limit ❌")
+                                    st.error(f"{student} exceeds 8 subjects")
                                     error_flag = True
-                                    continue
-
-                                # Check group rules
-                                if len(set(subjects) & set(GROUP_1)) > 1:
-                                    st.error(f"{student} has more than 1 subject from Group 1 ❌")
+                                if len(set(subjects)&set(GROUP_1))>1:
+                                    st.error(f"{student} has more than 1 subject from Group 1")
                                     error_flag = True
-                                if len(set(subjects) & set(GROUP_2)) > 1:
-                                    st.error(f"{student} has more than 1 subject from Group 2 ❌")
+                                if len(set(subjects)&set(GROUP_2))>1:
+                                    st.error(f"{student} has more than 1 subject from Group 2")
                                     error_flag = True
-                                if len(set(subjects) & set(GROUP_3)) > 1:
-                                    st.error(f"{student} has more than 1 subject from Group 3 ❌")
+                                if len(set(subjects)&set(GROUP_3))>1:
+                                    st.error(f"{student} has more than 1 subject from Group 3")
                                     error_flag = True
-
                             if not error_flag:
-                                # Remove duplicates
+                                # Remove old marks
                                 for _, row in uploaded_df.iterrows():
-                                    marks = marks[~((marks.student == row["student"]) & (marks.subject == row["subject"]))]
+                                    marks = marks[~((marks.student==row.student)&(marks.subject==row.subject))]
                                 marks = pd.concat([marks, uploaded_df], ignore_index=True)
                                 save(marks, MARKS_FILE)
 
                                 # Update results
-                                for student in uploaded_df["student"].unique():
-                                    student_marks = marks[marks.student == student]
-                                    total = student_marks["marks"].sum()
-                                    average = student_marks["marks"].mean()
+                                for student in uploaded_df.student.unique():
+                                    student_marks = marks[marks.student==student]
+                                    total = student_marks.marks.sum()
+                                    average = student_marks.marks.mean()
                                     grade = calculate_grade(average)
-
-                                    results = results[results.student != student]
-                                    new_result = pd.DataFrame([[student, total, round(average, 2), grade]], columns=results.columns)
-                                    results = pd.concat([results, new_result], ignore_index=True)
-
+                                    results = results[results.student!=student]
+                                    results = pd.concat([results, pd.DataFrame([[student,total,round(average,2),grade]], columns=results.columns)], ignore_index=True)
                                 save(results, RESULTS_FILE)
-                                st.success("All marks saved successfully ✅")
+                                st.success("All marks saved ✅")
                                 st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error reading file: {e}")
 
 # =====================================================
 # STUDENT PANEL
 # =====================================================
 elif role == "student":
-
     st.header(f"📊 Results for {user['username']}")
     student_name = user["username"]
 
-    student_marks = marks[marks.student == student_name]
-    student_result = results[results.student == student_name]
+    student_marks = marks[marks.student==student_name]
+    student_result = results[results.student==student_name]
 
     if not student_marks.empty:
         st.subheader("Subject Marks")
@@ -304,10 +281,10 @@ elif role == "student":
         st.metric("Average", student_result.iloc[0]["average"])
         st.metric("Grade", student_result.iloc[0]["grade"])
 
-    if len(student_marks) > 1:
-        X = np.arange(len(student_marks)).reshape(-1, 1)
-        y = student_marks["marks"].values
+    if len(student_marks)>1:
+        X = np.arange(len(student_marks)).reshape(-1,1)
+        y = student_marks.marks.values
         model = LinearRegression()
-        model.fit(X, y)
+        model.fit(X,y)
         prediction = model.predict([[len(y)]])[0]
         st.info(f"📈 Predicted next mark: {round(prediction,1)}")
