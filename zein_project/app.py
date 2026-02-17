@@ -70,24 +70,18 @@ def calculate_grade(avg):
     else: return "E"
 
 # =====================================================
-# LOAD DATA
+# LOGIN / FORGOT PASSWORD
 # =====================================================
 users, students, marks, attendance, results = load_all()
 
-# =====================================================
-# LOGIN / FORGOT PASSWORD
-# =====================================================
 if "user" not in st.session_state:
 
     st.title("🎓 School Portal Login")
-
     forgot_pw = st.checkbox("Forgot Password?")
 
     if forgot_pw:
         username = st.text_input("Enter Username", key="fp_username")
         sec_answer = st.text_input("Security Question: Who is Zein?", key="fp_answer")
-
-        # Show new password fields immediately
         new_password = st.text_input("Enter New Password", type="password", key="fp_new")
         confirm_password = st.text_input("Confirm New Password", type="password", key="fp_confirm")
 
@@ -96,7 +90,7 @@ if "user" not in st.session_state:
             if user_match.empty:
                 st.error("Username not found")
             elif sec_answer.strip().lower() != "zeiniszein":
-                st.error("Incorrect answer to security question")
+                st.error("Incorrect answer")
             elif new_password != confirm_password:
                 st.error("Passwords do not match")
             elif new_password.strip() == "":
@@ -106,7 +100,6 @@ if "user" not in st.session_state:
                 save(users, USERS_FILE)
                 st.success("Password reset successfully! You can now login.")
         st.stop()
-
     else:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
@@ -128,6 +121,7 @@ if st.sidebar.button("Logout"):
     del st.session_state.user
     st.rerun()
 
+# Reload data after login
 users, students, marks, attendance, results = load_all()
 
 # =====================================================
@@ -139,49 +133,43 @@ if role == "teacher":
     if students.empty:
         st.warning("No students available.")
     else:
-
         tab1, tab2 = st.tabs(["Manual Entry", "Upload CSV"])
 
-        # ======== TAB 1: Manual Entry ========
+        # ======== MANUAL ENTRY ========
         with tab1:
-
             selected_student = st.selectbox("Select Student", students["student_name"], key="manual_student_select")
             st.divider()
             st.subheader("Enter Student Subjects & Marks")
             student_data = []
 
-            # COMPULSORY SUBJECTS
-            st.markdown("### 📘 Compulsory Subjects (All Required)")
+            # Compulsory subjects
+            st.markdown("### 📘 Compulsory Subjects")
             for subject in COMPULSORY:
                 mark = st.number_input(f"{subject} Marks", min_value=0, max_value=100, key=f"{selected_student}_{subject}")
                 student_data.append((subject, mark))
 
-            # GROUP 1
-            st.markdown("### 🔬 Choose ONE: CRE or Physics")
-            group1_choice = st.radio("Group 1", GROUP_1, key=f"group1_{selected_student}")
-            mark1 = st.number_input(f"{group1_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group1_choice}")
+            # Group selections
+            group1_choice = st.radio("Group 1 (Choose One)", GROUP_1, key=f"group1_{selected_student}")
+            mark1 = st.number_input(f"{group1_choice} Marks", 0, 100, key=f"{selected_student}_{group1_choice}")
             student_data.append((group1_choice, mark1))
 
-            # GROUP 2
-            st.markdown("### 🌍 Choose ONE: History or Geography")
-            group2_choice = st.radio("Group 2", GROUP_2, key=f"group2_{selected_student}")
-            mark2 = st.number_input(f"{group2_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group2_choice}")
+            group2_choice = st.radio("Group 2 (Choose One)", GROUP_2, key=f"group2_{selected_student}")
+            mark2 = st.number_input(f"{group2_choice} Marks", 0, 100, key=f"{selected_student}_{group2_choice}")
             student_data.append((group2_choice, mark2))
 
-            # GROUP 3
-            st.markdown("### 💼 Choose ONE Technical Subject")
-            group3_choice = st.radio("Group 3", GROUP_3, key=f"group3_{selected_student}")
-            mark3 = st.number_input(f"{group3_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group3_choice}")
+            group3_choice = st.radio("Group 3 (Choose One)", GROUP_3, key=f"group3_{selected_student}")
+            mark3 = st.number_input(f"{group3_choice} Marks", 0, 100, key=f"{selected_student}_{group3_choice}")
             student_data.append((group3_choice, mark3))
 
             if st.button("Save Student Marks (Manual Entry)"):
+                # Remove old marks for student
                 marks = marks[marks.student != selected_student].copy()
                 for subject, mark in student_data:
                     marks = pd.concat([marks, pd.DataFrame([[selected_student, subject, mark]], columns=marks.columns)], ignore_index=True)
                 save(marks, MARKS_FILE)
 
                 # Update results
-                student_marks = marks[marks.student==selected_student]
+                student_marks = marks[marks.student == selected_student]
                 total = student_marks.marks.sum()
                 average = student_marks.marks.mean()
                 grade = calculate_grade(average)
@@ -189,10 +177,11 @@ if role == "teacher":
                 results = pd.concat([results, pd.DataFrame([[selected_student, total, round(average,2), grade]], columns=results.columns)], ignore_index=True)
                 save(results, RESULTS_FILE)
 
+                # Rerun so student panel sees updated marks
                 st.success("Marks saved successfully ✅")
-                st.rerun()
+                st.experimental_rerun()
 
-# ======== TAB 2: CSV Upload ========
+        # ======== CSV UPLOAD ========
         with tab2:
             st.subheader("📥 Step 1: Download CSV Template")
             template_rows = []
@@ -218,17 +207,13 @@ if role == "teacher":
                             if student not in students["student_name"].values:
                                 st.error(f"{student} not registered")
                                 error_flag = True
-                            s_df = uploaded_df[uploaded_df.student==student]
-                            subjects = s_df.subject.tolist()
-                            if len(subjects) > 8: error_flag=True
-                            if len(set(subjects)&set(GROUP_1))>1: error_flag=True
-                            if len(set(subjects)&set(GROUP_2))>1: error_flag=True
-                            if len(set(subjects)&set(GROUP_3))>1: error_flag=True
                         if not error_flag:
                             for _, row in uploaded_df.iterrows():
                                 marks = marks[~((marks.student==row.student)&(marks.subject==row.subject))].copy()
                             marks = pd.concat([marks, uploaded_df], ignore_index=True)
                             save(marks, MARKS_FILE)
+
+                            # Update results for each student
                             for student in uploaded_df.student.unique():
                                 student_marks = marks[marks.student==student]
                                 total = student_marks.marks.sum()
@@ -238,7 +223,7 @@ if role == "teacher":
                                 results = pd.concat([results, pd.DataFrame([[student,total,round(average,2),grade]], columns=results.columns)], ignore_index=True)
                             save(results, RESULTS_FILE)
                             st.success("All marks saved ✅")
-                            st.rerun()
+                            st.experimental_rerun()  # ensures updated marks appear immediately
 
 # =====================================================
 # STUDENT PANEL
