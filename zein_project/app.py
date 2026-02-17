@@ -141,10 +141,7 @@ if role == "admin":
         new_user = st.text_input("New Username")
         new_password = st.text_input("Password", type="password")
         role_select = st.selectbox("Role", ["teacher","student"])
-        if role_select=="teacher":
-            subject = st.text_input("Subject (for teacher)")
-        else:
-            subject = ""
+        subject = st.text_input("Subject (for teacher)") if role_select=="teacher" else ""
         if st.button("Add User"):
             if new_user.strip()=="" or new_password.strip()=="":
                 st.error("Username and password cannot be empty")
@@ -167,8 +164,35 @@ if role == "admin":
             save(users, USERS_FILE)
             st.success(f"User '{del_user}' removed ✅")
             st.experimental_rerun()
-
     st.info(f"Total users (excluding admin): {len(users)-1}")
+
+    st.subheader("👩‍🎓 Student Management")
+    col3, col4 = st.columns(2)
+    with col3:
+        new_student = st.text_input("New Student Name")
+        if st.button("Add Student"):
+            if new_student.strip() == "":
+                st.error("Student name cannot be empty")
+            elif new_student in students.student_name.values:
+                st.error("Student already exists")
+            else:
+                students = pd.concat([students, pd.DataFrame([{"student_name": new_student}])], ignore_index=True)
+                save(students, STUDENTS_FILE)
+                st.success(f"Student '{new_student}' added ✅")
+                st.experimental_rerun()
+    with col4:
+        del_student = st.selectbox("Select Student to Remove", students.student_name)
+        if st.button("Remove Student"):
+            students = students[students.student_name != del_student]
+            # Remove associated marks & results
+            marks = marks[marks.student != del_student]
+            results = results[results.student != del_student]
+            save(students, STUDENTS_FILE)
+            save(marks, MARKS_FILE)
+            save(results, RESULTS_FILE)
+            st.success(f"Student '{del_student}' removed ✅")
+            st.experimental_rerun()
+    st.info(f"Total students: {len(students)}")
 
 # =====================================================
 # TEACHER PANEL
@@ -242,4 +266,84 @@ elif role == "teacher":
             st.subheader("📥 Step 1: Download CSV Template")
             template_rows = []
             for student in students["student_name"]:
-                for subj in COMPULS
+                for subj in COMPULSORY + [GROUP_1[0], GROUP_2[0], GROUP_3[0]]:
+                    template_rows.append([student, subj, 0])
+            template_df = pd.DataFrame(template_rows, columns=["student","subject","marks"])
+            st.download_button("Download CSV Template", data=template_df.to_csv(index=False), file_name="marks_template.csv", mime="text/csv")
+
+            st.subheader("📤 Step 2: Upload Completed CSV")
+            uploaded_file = st.file_uploader("Upload CSV (student, subject, marks)", type=["csv"])
+            if uploaded_file:
+                uploaded_df = pd.read_csv(uploaded_file)
+                required_columns = {"student","subject","marks"}
+                if not required_columns.issubset(uploaded_df.columns):
+                    st.error("CSV must contain student, subject, marks")
+                else:
+                    uploaded_df = uploaded_df[uploaded_df.student.isin(students["student_name"])]
+                    st.success("File uploaded ✅")
+                    st.dataframe(uploaded_df)
+
+                    if st.button("Save Uploaded Marks (CSV)"):
+                        # Validate groups
+                        error_flag = False
+                        for student in uploaded_df["student"].unique():
+                            s_df = uploaded_df[uploaded_df.student==student]
+                            subjects = s_df.subject.tolist()
+                            if len(subjects) > 8:
+                                st.error(f"{student} has too many subjects")
+                                error_flag=True
+                            if len(set(subjects)&set(GROUP_1))>1 or len(set(subjects)&set(GROUP_2))>1 or len(set(subjects)&set(GROUP_3))>1:
+                                st.error(f"{student} has multiple choices in a group")
+                                error_flag=True
+                        if not error_flag:
+                            for _, row in uploaded_df.iterrows():
+                                marks = marks[~((marks.student==row.student)&(marks.subject==row.subject))].copy()
+                            marks = pd.concat([marks, uploaded_df], ignore_index=True)
+                            save(marks, MARKS_FILE)
+
+                            # Save results
+                            for student in uploaded_df.student.unique():
+                                student_marks = marks[marks.student==student]
+                                total = float(student_marks.marks.sum())
+                                average = float(student_marks.marks.mean())
+                                grade = calculate_grade(average)
+                                results = results[results.student != student].copy()
+                                new_result_df = pd.DataFrame([{
+                                    "student": student,
+                                    "total_marks": total,
+                                    "average": round(average,2),
+                                    "grade": grade
+                                }])
+                                results = pd.concat([results, new_result_df], ignore_index=True)
+                            save(results, RESULTS_FILE)
+                            st.success("All marks saved ✅")
+                            st.rerun()
+
+# =====================================================
+# STUDENT PANEL
+# =====================================================
+elif role == "student":
+    st.header(f"📊 Results for {user['username']}")
+    student_name = user["username"]
+
+    student_marks = marks[marks.student==student_name]
+    student_result = results[results.student==student_name]
+
+    if not student_marks.empty:
+        st.subheader("Subject Marks")
+        st.table(student_marks)
+        if len(student_marks) > 1:
+            st.bar_chart(student_marks.set_index("subject")["marks"])
+
+    if not student_result.empty:
+        st.metric("Total Marks", student_result.iloc[0]["total_marks"])
+        st.metric("Average", student_result.iloc[0]["average"])
+        st.metric("Grade", student_result.iloc[0]["grade"])
+
+    if len(student_marks) > 1:
+        X = np.arange(len(student_marks)).reshape(-1,1)
+        y = student_marks.marks.values
+        model = LinearRegression()
+        model.fit(X,y)
+        prediction = model.predict([[len(y)]])[0]
+        st.info(f"📈 Predicted next mark: {round(prediction,1)}")
