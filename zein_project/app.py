@@ -39,17 +39,21 @@ def create_file(file, columns, default=None):
     if not os.path.exists(file):
         pd.DataFrame(default if default else [], columns=columns).to_csv(file, index=False)
 
+
 def save(df, file):
     df.to_csv(file, index=False)
 
 def load():
-    return (
-        pd.read_csv(USERS_FILE),
-        pd.read_csv(STUDENTS_FILE),
-        pd.read_csv(MARKS_FILE),
-        pd.read_csv(RESULTS_FILE),
-        pd.read_csv(ATTENDANCE_FILE)
-    )
+    try:
+        users = pd.read_csv(USERS_FILE) if os.path.exists(USERS_FILE) else pd.DataFrame(columns=["username","password","role","subject"])
+        students = pd.read_csv(STUDENTS_FILE) if os.path.exists(STUDENTS_FILE) else pd.DataFrame(columns=["student_name","class_level"])
+        marks = pd.read_csv(MARKS_FILE) if os.path.exists(MARKS_FILE) else pd.DataFrame(columns=["student","class_level","term","subject","marks"])
+        results = pd.read_csv(RESULTS_FILE) if os.path.exists(RESULTS_FILE) else pd.DataFrame(columns=["student","class_level","term","total","average","grade","rank"])
+        attendance = pd.read_csv(ATTENDANCE_FILE) if os.path.exists(ATTENDANCE_FILE) else pd.DataFrame(columns=["student","class_level","term","days_present","total_days","attendance_percent"])
+        return users, students, marks, results, attendance
+    except Exception as e:
+        st.error(f"Error loading files: {e}")
+        st.stop()
 
 def grade(avg):
     if avg >= 80: return "A"
@@ -62,7 +66,7 @@ def grade(avg):
 # INITIALIZE FILES
 # =====================================================
 create_file(USERS_FILE, ["username","password","role","subject"],
-            [["admin", hash_password("12345"), "admin", ""]])
+            [["admin", hash_password("1234"), "admin", ""]])
 
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
@@ -109,22 +113,86 @@ if role == "admin":
 
     st.header("🛠 Admin Dashboard")
 
-    # ----- Add Student -----
-    st.subheader("Add Student")
-    name = st.text_input("Student Name")
-    class_level = st.selectbox("Class Level", CLASSES)
+    # Create tabs for different admin functions
+    admin_tab1, admin_tab2, admin_tab3 = st.tabs(["Add Student", "Add Teacher", "View Users"])
 
-    if st.button("Add Student"):
-        if name in students.student_name.values:
-            st.error("Student exists")
+    # ----- ADD STUDENT TAB -----
+    with admin_tab1:
+        st.subheader("➕ Add Student")
+        student_name = st.text_input("Student Name", key="student_name_input").strip()
+        student_class = st.selectbox("Class Level", CLASSES, key="student_class_select")
+
+        if st.button("Add Student", key="add_student_btn"):
+            if not student_name:
+                st.error("❌ Student name cannot be empty")
+            elif student_name in students.student_name.values:
+                st.error("❌ Student already exists")
+            else:
+                # Add student record
+                new_student = pd.DataFrame([{
+                    "student_name": student_name,
+                    "class_level": student_class
+                }])
+                students = pd.concat([students, new_student], ignore_index=True)
+                save(students, STUDENTS_FILE)
+
+                # Add student user account
+                new_user = pd.DataFrame([{
+                    "username": student_name,
+                    "password": hash_password("1234"),
+                    "role": "student",
+                    "subject": ""
+                }])
+                users = pd.concat([users, new_user], ignore_index=True)
+                save(users, USERS_FILE)
+
+                st.success(f"✅ Student '{student_name}' added successfully! Password: 1234")
+                st.rerun()
+
+    # ----- ADD TEACHER TAB -----
+    with admin_tab2:
+        st.subheader("➕ Add Teacher")
+        teacher_subject = st.selectbox("Subject", ALL_SUBJECTS, key="teacher_subject_select")
+        teacher_number = st.number_input("Teacher Number", min_value=1, max_value=10, value=1, key="teacher_number_input")
+        teacher_username = f"{teacher_subject.lower()}{teacher_number}"
+
+        st.info(f"📝 Username will be: **{teacher_username}**")
+
+        if st.button("Add Teacher", key="add_teacher_btn"):
+            # Check if username already exists
+            if teacher_username in users.username.values:
+                st.error(f"❌ Teacher username '{teacher_username}' already exists")
+            else:
+                # Add teacher user account
+                new_user = pd.DataFrame([{
+                    "username": teacher_username,
+                    "password": hash_password("1234"),
+                    "role": "teacher",
+                    "subject": teacher_subject
+                }])
+                users = pd.concat([users, new_user], ignore_index=True)
+                save(users, USERS_FILE)
+
+                st.success(f"✅ Teacher '{teacher_username}' ({teacher_subject}) added successfully! Password: 1234")
+                st.rerun()
+
+    # ----- VIEW USERS TAB -----
+    with admin_tab3:
+        st.subheader("👥 All Users")
+        
+        if not users.empty:
+            # Display users in a formatted table
+            display_users = users[["username", "role", "subject"]].copy()
+            display_users["Password"] = "1234"
+            st.dataframe(display_users, use_container_width=True)
+            
+            st.subheader("📊 User Statistics")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Users", len(users))
+            col2.metric("Teachers", len(users[users.role=="teacher"]))
+            col3.metric("Students", len(users[users.role=="student"]))
         else:
-            students = pd.concat([students, pd.DataFrame([{
-                "student_name": name,
-                "class_level": class_level
-            }])])
-            save(students, STUDENTS_FILE)
-            st.success("Student added")
-            st.rerun()
+            st.info("No users found")
 
 # =====================================================
 # TEACHER DASHBOARD
@@ -134,7 +202,7 @@ elif role == "teacher":
     st.header("👩‍🏫 Teacher Dashboard")
 
     if students.empty:
-        st.warning("No students found")
+        st.warning("⚠️ No students found in the system")
         st.stop()
 
     selected_class = st.selectbox("Select Class", CLASSES)
@@ -143,43 +211,57 @@ elif role == "teacher":
     class_students = students[students.class_level==selected_class]
 
     if class_students.empty:
-        st.warning("No students in this class")
+        st.warning(f"⚠️ No students in {selected_class}")
         st.stop()
 
-    selected_student = st.selectbox("Select Student", class_students.student_name)
+    selected_student = st.selectbox("Select Student", class_students.student_name.values)
 
     tab1, tab2 = st.tabs(["Marks Entry","Attendance"])
 
     # ================= MARKS =================
     with tab1:
+        st.subheader(f"📝 Enter Marks for {selected_student}")
 
         student_data = []
 
+        # Compulsory subjects
+        st.write("**Compulsory Subjects:**")
         for subject in COMPULSORY:
-            m = st.number_input(f"{subject}",0,100,key=f"{subject}")
-            student_data.append((subject,m))
+            m = st.number_input(f"{subject}", 0, 100, value=0, key=f"mark_{subject}")
+            student_data.append((subject, m))
 
-        g1 = st.radio("Group 1", GROUP_1)
-        student_data.append((g1, st.number_input(f"{g1}",0,100)))
+        # Group 1
+        st.write("**Group 1 (Select One):**")
+        g1 = st.radio("Group 1", GROUP_1, key="group1_radio")
+        g1_marks = st.number_input(f"{g1} Marks", 0, 100, value=0, key="group1_marks")
+        student_data.append((g1, g1_marks))
 
-        g2 = st.radio("Group 2", GROUP_2)
-        student_data.append((g2, st.number_input(f"{g2}",0,100)))
+        # Group 2
+        st.write("**Group 2 (Select One):**")
+        g2 = st.radio("Group 2", GROUP_2, key="group2_radio")
+        g2_marks = st.number_input(f"{g2} Marks", 0, 100, value=0, key="group2_marks")
+        student_data.append((g2, g2_marks))
 
-        g3 = st.radio("Group 3", GROUP_3)
-        student_data.append((g3, st.number_input(f"{g3}",0,100)))
+        # Group 3
+        st.write("**Group 3 (Select One):**")
+        g3 = st.radio("Group 3", GROUP_3, key="group3_radio")
+        g3_marks = st.number_input(f"{g3} Marks", 0, 100, value=0, key="group3_marks")
+        student_data.append((g3, g3_marks))
 
-        if st.button("Save Marks"):
+        if st.button("Save Marks", key="save_marks_btn"):
 
+            # Remove existing marks for this student/term/class
             marks = marks[~((marks.student==selected_student)&
                             (marks.term==selected_term)&
                             (marks.class_level==selected_class))]
 
+            # Create new marks dataframe
             df = pd.DataFrame(student_data, columns=["subject","marks"])
-            df.insert(0,"term",selected_term)
-            df.insert(0,"class_level",selected_class)
-            df.insert(0,"student",selected_student)
+            df.insert(0, "term", selected_term)
+            df.insert(0, "class_level", selected_class)
+            df.insert(0, "student", selected_student)
 
-            marks = pd.concat([marks,df])
+            marks = pd.concat([marks, df], ignore_index=True)
             save(marks, MARKS_FILE)
 
             total = df.marks.sum()
@@ -190,54 +272,61 @@ elif role == "teacher":
                                 (results.term==selected_term)&
                                 (results.class_level==selected_class))]
 
-            results = pd.concat([results,pd.DataFrame([{
-                "student":selected_student,
-                "class_level":selected_class,
-                "term":selected_term,
-                "total":total,
-                "average":round(avg,2),
-                "grade":grade(avg),
-                "rank":0
-            }])])
+            # Add new result
+            results = pd.concat([results, pd.DataFrame([{
+                "student": selected_student,
+                "class_level": selected_class,
+                "term": selected_term,
+                "total": total,
+                "average": round(avg, 2),
+                "grade": grade(avg),
+                "rank": 0
+            }])], ignore_index=True)
 
             # ===== RANKING SYSTEM =====
             term_results = results[(results.class_level==selected_class)&
-                                   (results.term==selected_term)]
+                                   (results.term==selected_term)].copy()
 
-            term_results = term_results.sort_values("average", ascending=False)
+            term_results = term_results.sort_values("average", ascending=False).reset_index(drop=True)
             term_results["rank"] = range(1, len(term_results)+1)
 
-            results.update(term_results)
+            # Update ranks in main results dataframe
+            results = results[~((results.class_level==selected_class) & (results.term==selected_term))]
+            results = pd.concat([results, term_results], ignore_index=True)
+            
             save(results, RESULTS_FILE)
 
-            st.success("Marks saved & ranking updated")
+            st.success(f"✅ Marks saved for {selected_student}! Average: {round(avg, 2)}, Grade: {grade(avg)}")
             st.rerun()
 
     # ================= ATTENDANCE =================
     with tab2:
+        st.subheader(f"📋 Mark Attendance for {selected_student}")
 
-        total_days = st.number_input("Total Days",1,365,100)
-        present = st.number_input("Days Present",0,total_days)
+        total_days = st.number_input("Total Days in Term", min_value=1, max_value=365, value=100, key="total_days")
+        present = st.number_input("Days Present", min_value=0, max_value=total_days, value=0, key="days_present")
 
-        if st.button("Save Attendance"):
+        if st.button("Save Attendance", key="save_attendance_btn"):
 
-            percent = round((present/total_days)*100,2)
+            percent = round((present/total_days)*100, 2)
 
+            # Remove existing attendance
             attendance = attendance[~((attendance.student==selected_student)&
                                        (attendance.term==selected_term)&
                                        (attendance.class_level==selected_class))]
 
-            attendance = pd.concat([attendance,pd.DataFrame([{
-                "student":selected_student,
-                "class_level":selected_class,
-                "term":selected_term,
-                "days_present":present,
-                "total_days":total_days,
-                "attendance_percent":percent
-            }])])
+            # Add new attendance
+            attendance = pd.concat([attendance, pd.DataFrame([{
+                "student": selected_student,
+                "class_level": selected_class,
+                "term": selected_term,
+                "days_present": present,
+                "total_days": total_days,
+                "attendance_percent": percent
+            }])], ignore_index=True)
 
             save(attendance, ATTENDANCE_FILE)
-            st.success("Attendance saved")
+            st.success(f"✅ Attendance saved! Percentage: {percent}%")
             st.rerun()
 
 # =====================================================
@@ -249,33 +338,68 @@ elif role == "student":
 
     student_name = user["username"]
 
-    student_results = results[results.student==student_name]
-    student_marks = marks[marks.student==student_name]
+    student_results = results[results.student==student_name] if not results.empty else pd.DataFrame()
+    student_marks = marks[marks.student==student_name] if not marks.empty else pd.DataFrame()
+    student_attendance = attendance[attendance.student==student_name] if not attendance.empty else pd.DataFrame()
 
     if student_results.empty:
-        st.warning("No results yet")
+        st.warning("⚠️ No results yet. Marks will appear here once teachers enter them.")
         st.stop()
 
     selected_term = st.selectbox("Select Term", student_results.term.unique())
 
     term_data = student_results[student_results.term==selected_term]
 
-    st.metric("Average", term_data.iloc[0]["average"])
-    st.metric("Grade", term_data.iloc[0]["grade"])
-    st.metric("Rank in Class", int(term_data.iloc[0]["rank"]))
+    if not term_data.empty:
+        # Display metrics in columns
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📈 Average", term_data.iloc[0]["average"])
+        
+        with col2:
+            st.metric("🎯 Grade", term_data.iloc[0]["grade"])
+        
+        with col3:
+            st.metric("🏆 Rank in Class", int(term_data.iloc[0]["rank"]))
 
-    # ===== AI PREDICTION BASED ON HISTORY =====
-    if len(student_results) >= 2:
+        # Display marks for the term
+        st.subheader("📝 Your Marks")
+        term_marks = student_marks[student_marks.term==selected_term]
+        if not term_marks.empty:
+            marks_display = term_marks[["subject", "marks"]].copy()
+            st.dataframe(marks_display, use_container_width=True)
+        
+        # Display attendance for the term
+        st.subheader("📋 Your Attendance")
+        term_attendance = student_attendance[student_attendance.term==selected_term]
+        if not term_attendance.empty:
+            attendance_display = term_attendance[["days_present", "total_days", "attendance_percent"]].copy()
+            attendance_display.columns = ["Days Present", "Total Days", "Attendance %"]
+            st.dataframe(attendance_display, use_container_width=True)
 
-        history = student_results.sort_values("term")
-        X = np.arange(len(history)).reshape(-1,1)
-        y = history.average.values
+        # ===== AI PREDICTION BASED ON HISTORY =====
+        if len(student_results) >= 2:
 
-        model = LinearRegression()
-        model.fit(X,y)
+            st.subheader("🤖 Performance Prediction")
+            
+            history = student_results.sort_values("term").reset_index(drop=True)
+            X = np.arange(len(history)).reshape(-1, 1)
+            y = history.average.values
 
-        future_index = [[len(history)]]
-        prediction = model.predict(future_index)[0]
+            model = LinearRegression()
+            model.fit(X, y)
 
-        st.info(f"🤖 Predicted Next Term Average: {round(prediction,2)}")
-        st.info(f"Predicted Grade: {grade(prediction)}")
+            future_index = [[len(history)]]
+            prediction = model.predict(future_index)[0]
+            
+            # Ensure prediction is within valid range
+            prediction = max(0, min(100, prediction))
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info(f"📊 Predicted Next Term Average: **{round(prediction, 2)}**")
+            with col2:
+                st.info(f"🎯 Predicted Grade: **{grade(prediction)}**")
+    else:
+        st.error("❌ No data available for the selected term")
