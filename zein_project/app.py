@@ -4,115 +4,99 @@ import os
 import hashlib
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="Advanced School ERP AI", layout="wide")
+st.set_page_config("Zein School ERP AI", layout="wide")
 
-# ==========================
-# FILES AND DATA
-# ==========================
+# =========================
+# FILES
+# =========================
 USERS_FILE = "users.csv"
 STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
-RESULTS_FILE = "results.csv"
 ATTENDANCE_FILE = "attendance.csv"
 
 TERMS = ["Term 1", "Term 2", "Term 3"]
-TERM_ORDER = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
+TERM_INDEX = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
 CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
 
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry", "Biology"]
-GROUP_1 = ["Physics", "CRE", "IRE", "HRE"]
-GROUP_2 = ["History", "Geography"]
-GROUP_3 = ["Business", "Agriculture", "Computer", "French", "German", "Arabic"]
-GROUP_4 = ["Wood Technology", "Metal Work", "Building Construction", "Electricity"]
-ALL_SUBJECTS = COMPULSORY + GROUP_1 + GROUP_2 + GROUP_3 + GROUP_4
+HUMANITIES = ["History", "Geography"]
+SCIENCE_REL = ["CRE", "Physics"]
+TECHNICAL = ["Business", "Computer", "Agriculture"]
 
-# ==========================
+# =========================
 # UTILITIES
-# ==========================
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+# =========================
+def hash_password(p):
+    return hashlib.sha256(p.encode()).hexdigest()
 
-def create_file(file, columns, default=None):
+def ensure_csv(file, cols, default=None):
     if not os.path.exists(file):
-        pd.DataFrame(default if default else [], columns=columns).to_csv(file, index=False)
+        pd.DataFrame(default or [], columns=cols).to_csv(file, index=False)
+
+def load(file):
+    return pd.read_csv(file)
 
 def save(df, file):
     df.to_csv(file, index=False)
 
-def safe_columns(df, cols):
-    for c in cols:
-        if c not in df.columns:
-            df[c] = None
-    return df
-
-def load_data():
-    users = pd.read_csv(USERS_FILE) if os.path.exists(USERS_FILE) else pd.DataFrame()
-    students = pd.read_csv(STUDENTS_FILE) if os.path.exists(STUDENTS_FILE) else pd.DataFrame()
-    marks = pd.read_csv(MARKS_FILE) if os.path.exists(MARKS_FILE) else pd.DataFrame()
-    results = pd.read_csv(RESULTS_FILE) if os.path.exists(RESULTS_FILE) else pd.DataFrame()
-    attendance = pd.read_csv(ATTENDANCE_FILE) if os.path.exists(ATTENDANCE_FILE) else pd.DataFrame()
-
-    users = safe_columns(users, ["username","password","role","subject"])
-    students = safe_columns(students, ["student_name","class_level"])
-    marks = safe_columns(marks, ["student","class_level","term","subject","marks"])
-    results = safe_columns(results, ["student","class_level","term","total","average","grade","rank"])
-    attendance = safe_columns(attendance, ["student","class_level","term","days_present","total_days","attendance_percent"])
-
-    return users, students, marks, results, attendance
-
 def grade(avg):
     if avg >= 80: return "A"
-    elif avg >= 70: return "B"
-    elif avg >= 60: return "C"
-    elif avg >= 50: return "D"
-    else: return "E"
+    if avg >= 70: return "B"
+    if avg >= 60: return "C"
+    if avg >= 50: return "D"
+    return "E"
 
-# ==========================
-# CREATE FILES IF NOT EXIST
-# ==========================
-create_file(USERS_FILE, ["username","password","role","subject"], [["admin", hash_password("1234"), "admin", ""]])
-create_file(STUDENTS_FILE, ["student_name","class_level"])
-create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
-create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
-create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
+# =========================
+# AI – ZEIN
+# =========================
+def zein_predict(scores, terms):
+    """
+    Simple linear trend prediction.
+    Stable, explainable, no ML dependency.
+    """
+    if len(scores) < 2:
+        return scores[-1]
 
-users, students, marks, results, attendance = load_data()
+    x = np.array(terms)
+    y = np.array(scores)
 
-# ==========================
-# LOGIN & FORGOT PASSWORD
-# ==========================
+    coef = np.polyfit(x, y, 1)
+    next_term = max(terms) + 1
+    pred = coef[0] * next_term + coef[1]
+    return max(0, min(100, pred))
+
+# =========================
+# CREATE FILES
+# =========================
+ensure_csv(
+    USERS_FILE,
+    ["username","password","role","subject"],
+    [["admin", hash_password("1234"), "admin", ""]]
+)
+ensure_csv(STUDENTS_FILE, ["student","class"])
+ensure_csv(MARKS_FILE, ["student","class","term","subject","marks"])
+ensure_csv(ATTENDANCE_FILE, ["student","class","term","attendance"])
+
+users = load(USERS_FILE)
+students = load(STUDENTS_FILE)
+marks = load(MARKS_FILE)
+attendance = load(ATTENDANCE_FILE)
+
+# =========================
+# LOGIN
+# =========================
 if "user" not in st.session_state:
     st.title("🎓 Zein School ERP Login")
-    st.write("---")
-    tab_login, tab_forget = st.tabs(["Login", "Forgot Password"])
-
-    with tab_login:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            match = users[(users["username"]==username) & (users["password"]==hash_password(password))]
-            if not match.empty:
-                st.session_state.user = match.iloc[0].to_dict()
-                st.experimental_rerun()
-            else:
-                st.error("Invalid username or password")
-
-    with tab_forget:
-        username_fp = st.text_input("Enter your username")
-        question = st.text_input("Security Question: Who is Zein?")
-        if st.button("Reset Password"):
-            if username_fp not in users["username"].values:
-                st.error("Username not found")
-            elif question.strip().lower() != "zeiniszein":
-                st.error("Incorrect answer")
-            else:
-                new_pass = st.text_input("Enter new password", type="password", key="new_pass")
-                if new_pass and st.button("Save New Password", key="save_new_pass"):
-                    users.loc[users["username"]==username_fp, "password"] = hash_password(new_pass)
-                    save(users, USERS_FILE)
-                    st.success("Password reset successfully")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    if st.button("Login"):
+        m = users[(users.username==u) & (users.password==hash_password(p))]
+        if not m.empty:
+            st.session_state.user = m.iloc[0].to_dict()
+            st.rerun()
+        else:
+            st.error("Invalid login")
     st.stop()
 
 user = st.session_state.user
@@ -120,156 +104,168 @@ role = user["role"]
 
 st.sidebar.write(f"👤 {user['username']} ({role})")
 if st.sidebar.button("Logout"):
-    del st.session_state.user
-    st.experimental_rerun()
+    st.session_state.clear()
+    st.rerun()
 
-# ==========================
-# STUDENT DASHBOARD
-# ==========================
-if role=="student":
-    st.header("📊 Student AI Dashboard")
-    student_name = user["username"]
-    users, students, marks, results, attendance = load_data()
-    student_results = results[results["student"]==student_name]
-    student_marks = marks[marks["student"]==student_name]
-    student_attendance = attendance[attendance["student"]==student_name]
+# =========================
+# ADMIN
+# =========================
+if role == "admin":
+    st.header("🛠 Admin Dashboard")
 
-    if student_results.empty:
-        st.warning("No results yet")
+    tab1, tab2 = st.tabs(["Add Users", "Remove Users"])
+
+    with tab1:
+        st.subheader("➕ Add Student")
+        name = st.text_input("Student Full Name")
+        cls = st.selectbox("Class", CLASSES)
+        if st.button("Create Student"):
+            if name and name not in users.username.values:
+                users.loc[len(users)] = [name, hash_password("1234"), "student", ""]
+                students.loc[len(students)] = [name, cls]
+                save(users, USERS_FILE)
+                save(students, STUDENTS_FILE)
+                st.success("Student created (password = 1234)")
+
+        st.subheader("➕ Add Teacher")
+        subject = st.text_input("Subject")
+        number = st.text_input("Number")
+        if st.button("Create Teacher"):
+            username = f"{subject.lower()}{number}"
+            if username not in users.username.values:
+                users.loc[len(users)] = [username, hash_password("1234"), "teacher", subject]
+                save(users, USERS_FILE)
+                st.success(f"Teacher created ({username})")
+
+    with tab2:
+        removable = users[users.username!="admin"]["username"].tolist()
+        target = st.selectbox("Select User", removable)
+        if st.button("Delete User"):
+            users = users[users.username!=target]
+            students = students[students.student!=target]
+            marks = marks[marks.student!=target]
+            attendance = attendance[attendance.student!=target]
+            save(users, USERS_FILE)
+            save(students, STUDENTS_FILE)
+            save(marks, MARKS_FILE)
+            save(attendance, ATTENDANCE_FILE)
+            st.success("User removed")
+
+# =========================
+# TEACHER
+# =========================
+elif role == "teacher":
+    st.header(f"👩‍🏫 Teacher Dashboard — {user['subject']}")
+
+    cls = st.selectbox("Class", CLASSES)
+    term = st.selectbox("Term", TERMS)
+    term_id = TERM_INDEX[term]
+
+    class_students = students[students["class"]==cls]["student"].tolist()
+    if not class_students:
+        st.warning("No students")
         st.stop()
 
-    # Overall Performance Trend
-    st.subheader("📈 Overall Performance Trend")
-    history = student_results.copy()
-    history["term_order"] = history["term"].map(TERM_ORDER)
-    history = history.sort_values("term_order")
-    fig, ax = plt.subplots()
-    ax.bar(history["term"], history["average"], color='skyblue')
-    ax.set_ylabel("Average Score"); ax.set_xlabel("Term"); ax.set_title("Average Score Over Terms")
-    st.pyplot(fig)
+    st.subheader("📚 Subject Selection Rules")
+    hum = st.selectbox("Humanity (ONE)", HUMANITIES)
+    sci = st.selectbox("CRE / Physics (ONE)", SCIENCE_REL)
+    tech = st.selectbox("Technical (ONE)", TECHNICAL)
 
-    # Latest Subject-wise Marks
-    latest_term = history.iloc[-1]["term"]
-    latest_marks = student_marks[student_marks["term"]==latest_term]
-    if not latest_marks.empty:
-        st.subheader(f"📊 Marks by Subject ({latest_term})")
-        fig2, ax2 = plt.subplots(figsize=(10,5))
-        ax2.bar(latest_marks["subject"], latest_marks["marks"], color='orange')
-        ax2.set_ylabel("Marks"); ax2.set_xlabel("Subject"); ax2.set_title(f"Subject-wise Marks for {latest_term}")
-        ax2.set_ylim(0,100)
-        plt.xticks(rotation=45, ha='right')
-        st.pyplot(fig2)
+    subjects = COMPULSORY + [hum, sci, tech]
 
-        mean_mark = latest_marks["marks"].mean()
-        st.metric("Mean Mark", round(mean_mark,2))
-        st.metric("Overall Grade", grade(mean_mark))
-
-    # AI Predictions for Next Term
-    st.subheader("🔮 AI Predictions for Next Term")
-    predicted_marks = []
-    subjects = student_marks["subject"].unique()
     for subj in subjects:
-        subj_data = student_marks[student_marks["subject"]==subj].copy()
-        subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
-        subj_data = subj_data.sort_values("term_order")
-        if len(subj_data) < 2:
-            pred = subj_data["marks"].iloc[-1] if not subj_data.empty else 0
-        else:
-            X = np.arange(len(subj_data)).reshape(-1,1)
-            y = subj_data["marks"].values
-            model = LinearRegression()
-            model.fit(X,y)
-            pred = model.predict([[len(subj_data)]])[0]
-        pred = max(0,min(100,pred))
-        predicted_marks.append({"subject": subj, "predicted_marks": round(pred,2)})
-
-    pred_df = pd.DataFrame(predicted_marks)
-    st.dataframe(pred_df)
-
-    expected_mean = pred_df["predicted_marks"].mean() if not pred_df.empty else 0
-    st.metric("Expected Mean Mark", round(expected_mean,2))
-    st.metric("Expected Grade", grade(expected_mean))
-
-    # Subject Trends Across Terms
-    if len(history) > 1:
-        st.subheader("📊 Subject Trends Across Terms")
-        fig3, ax3 = plt.subplots(figsize=(12,6))
-        for subj in subjects:
-            subj_data = student_marks[student_marks["subject"]==subj].copy()
-            subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
-            subj_data = subj_data.sort_values("term_order")
-            ax3.plot(subj_data["term"], subj_data["marks"], marker='o', label=subj)
-        ax3.set_ylabel("Marks"); ax3.set_xlabel("Term"); ax3.set_title("Subject Performance Trends")
-        ax3.set_ylim(0,100)
-        plt.xticks(rotation=45)
-        ax3.legend(bbox_to_anchor=(1.05,1),loc='upper left')
-        st.pyplot(fig3)
-
-    # Attendance
-    st.subheader("📋 Attendance")
-    if not student_attendance.empty:
-        st.dataframe(student_attendance[["term","attendance_percent"]])
-
-# ==========================
-# TEACHER / ADMIN DASHBOARD
-# ==========================
-elif role in ["teacher", "admin"]:
-    st.header(f"👩‍🏫 {role.capitalize()} Dashboard")
-    users, students, marks, results, attendance = load_data()
-    selected_class = st.selectbox("Select Class", CLASSES)
-    class_students = students[students["class_level"]==selected_class]
-    if class_students.empty:
-        st.warning("No students in this class")
-        st.stop()
-
-    # Class Marks and AI Predictions
-    st.subheader("📊 Student Marks & AI Predictions")
-    table_data = []
-    for student in class_students["student_name"].values:
-        student_marks = marks[marks["student"]==student]
-        latest_term_marks = student_marks[student_marks["term"]==TERMS[-1]]
-        mean_mark = latest_term_marks["marks"].mean() if not latest_term_marks.empty else 0
-
-        # Prediction
-        student_prediction = []
-        subjects = student_marks["subject"].unique()
-        for subj in subjects:
-            subj_data = student_marks[student_marks["subject"]==subj].copy()
-            subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
-            subj_data = subj_data.sort_values("term_order")
-            if len(subj_data) < 2:
-                pred = subj_data["marks"].iloc[-1] if not subj_data.empty else 0
-            else:
-                X = np.arange(len(subj_data)).reshape(-1,1)
-                y = subj_data["marks"].values
-                model = LinearRegression()
-                model.fit(X,y)
-                pred = model.predict([[len(subj_data)]])[0]
-            pred = max(0,min(100,pred))
-            student_prediction.append(pred)
-
-        expected_mean = np.mean(student_prediction) if student_prediction else mean_mark
-        table_data.append({
-            "Student": student,
-            "Latest Mean": round(mean_mark,2),
-            "Expected Mean": round(expected_mean,2),
-            "Expected Grade": grade(expected_mean)
+        st.markdown(f"### {subj}")
+        table = pd.DataFrame({
+            "student": class_students,
+            "marks": [
+                marks[(marks.student==s)&(marks.term==term)&(marks.subject==subj)]["marks"].values[0]
+                if not marks[(marks.student==s)&(marks.term==term)&(marks.subject==subj)].empty else 0
+                for s in class_students
+            ]
         })
 
-    class_df = pd.DataFrame(table_data)
-    st.dataframe(class_df)
+        edited = st.data_editor(table, num_rows="fixed", key=subj)
 
-    # Bar Chart for Class Predictions
-    st.subheader("📊 Class Expected Mean Marks")
-    fig, ax = plt.subplots(figsize=(10,5))
-    ax.bar(class_df["Student"], class_df["Expected Mean"], color='green')
-    ax.set_ylabel("Expected Mean"); ax.set_xlabel("Student"); ax.set_title(f"Class {selected_class} Predictions")
+        if st.button(f"Save {subj}", key=f"save_{subj}"):
+            marks = marks[~((marks.term==term)&(marks.subject==subj)&
+                            (marks.student.isin(class_students)))]
+            for _, r in edited.iterrows():
+                marks.loc[len(marks)] = {
+                    "student": r.student,
+                    "class": cls,
+                    "term": term,
+                    "subject": subj,
+                    "marks": r.marks
+                }
+            save(marks, MARKS_FILE)
+            st.success(f"{subj} saved")
+
+    st.subheader("📋 Attendance (%)")
+    att = pd.DataFrame({
+        "student": class_students,
+        "attendance": [
+            attendance[(attendance.student==s)&(attendance.term==term)]["attendance"].values[0]
+            if not attendance[(attendance.student==s)&(attendance.term==term)].empty else 0
+            for s in class_students
+        ]
+    })
+
+    att_edit = st.data_editor(att, num_rows="fixed")
+
+    if st.button("Save Attendance"):
+        attendance = attendance[~((attendance.term==term)&
+                                  (attendance.student.isin(class_students)))]
+        for _, r in att_edit.iterrows():
+            attendance.loc[len(attendance)] = {
+                "student": r.student,
+                "class": cls,
+                "term": term,
+                "attendance": r.attendance
+            }
+        save(attendance, ATTENDANCE_FILE)
+        st.success("Attendance saved")
+
+# =========================
+# STUDENT + ZEIN AI
+# =========================
+elif role == "student":
+    st.header("📊 Student Dashboard")
+
+    sm = marks[marks.student==user["username"]]
+    sa = attendance[attendance.student==user["username"]]
+
+    if sm.empty:
+        st.info("No records yet")
+        st.stop()
+
+    st.subheader("📈 Performance Trend")
+    avg = sm.groupby("term")["marks"].mean().reset_index()
+    fig, ax = plt.subplots()
+    ax.plot(avg.term, avg.marks, marker="o")
     ax.set_ylim(0,100)
-    plt.xticks(rotation=45)
     st.pyplot(fig)
 
-    # Prediction Summary at Bottom
-    st.subheader("🔮 Summary Predictions")
-    overall_expected_mean = class_df["Expected Mean"].mean() if not class_df.empty else 0
-    st.metric("Class Expected Mean Mark", round(overall_expected_mean,2))
-    st.metric("Class Expected Grade", grade(overall_expected_mean))
+    overall = sm.marks.mean()
+    st.metric("Overall Average", round(overall,2))
+    st.metric("Overall Grade", grade(overall))
+
+    st.subheader("🤖 ZEIN AI – Next Term Prediction")
+
+    preds = []
+    for subj in sm.subject.unique():
+        d = sm[sm.subject==subj].copy()
+        d["t"] = d.term.map(TERM_INDEX)
+        pred = zein_predict(d.marks.tolist(), d.t.tolist())
+        preds.append({"Subject": subj, "Predicted Mark": round(pred,2)})
+
+    pdf = pd.DataFrame(preds)
+    st.dataframe(pdf)
+
+    mean_pred = pdf["Predicted Mark"].mean()
+    st.metric("Predicted Mean", round(mean_pred,2))
+    st.metric("Predicted Grade", grade(mean_pred))
+
+    if not sa.empty:
+        st.subheader("📊 Attendance vs Performance")
+        merged = pd.merge(sm, sa, on=["student","class","term"])
+        st.scatter_chart(merged, x="attendance", y="marks")
