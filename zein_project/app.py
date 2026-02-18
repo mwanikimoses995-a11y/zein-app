@@ -76,11 +76,18 @@ def grade(avg):
 # ==========================
 # CREATE FILES IF NOT EXIST
 # ==========================
-create_file(USERS_FILE, ["username","password","role","subject"], [["admin", hash_password("1234"), "admin", ""]])
+create_file(USERS_FILE, ["username","password","role","subject"])
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
 create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
 create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
+
+# Ensure admin account exists
+users, students, marks, results, attendance = load()
+if "admin" not in users["username"].values:
+    admin_df = pd.DataFrame([{"username":"admin","password":hash_password("1234"),"role":"admin","subject":""}])
+    users = pd.concat([users, admin_df], ignore_index=True)
+    save(users, USERS_FILE)
 
 # ==========================
 # LOGIN
@@ -94,7 +101,7 @@ if "user" not in st.session_state:
         match = users[(users["username"]==u) & (users["password"]==hash_password(p))]
         if not match.empty:
             st.session_state.user = match.iloc[0].to_dict()
-            st.rerun()
+            st.experimental_rerun()
         else:
             st.error("Invalid login")
     st.stop()
@@ -106,7 +113,7 @@ role = user["role"]
 st.sidebar.write(f"👤 {user['username']} ({role})")
 if st.sidebar.button("Logout"):
     del st.session_state.user
-    st.rerun()
+    st.experimental_rerun()
 
 # ==========================
 # ADMIN DASHBOARD
