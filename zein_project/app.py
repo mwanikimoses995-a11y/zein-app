@@ -215,7 +215,9 @@ elif role in ["teacher","admin"]:
     st.header(f"👩‍🏫 {role.capitalize()} Dashboard")
     users, students, marks, results, attendance = load_data()
 
-    # Admin: Add Users
+    # --------------------------
+    # ADMIN FEATURES
+    # --------------------------
     if role=="admin":
         st.subheader("➕ Add Users")
         user_type = st.selectbox("User Type", ["Student","Teacher"])
@@ -246,20 +248,43 @@ elif role in ["teacher","admin"]:
                         save(users, USERS_FILE)
                         st.success(f"Teacher {username} added successfully")
 
-    selected_class = st.selectbox("Select Class", CLASSES)
-    class_students = students[students["class_level"]==selected_class]
-    if class_students.empty:
-        st.warning("No students in this class")
-        st.stop()
+        st.subheader("🗂️ All Users")
+        st.dataframe(users)
 
-    # Teacher: Enter Marks
+        st.subheader("❌ Remove User")
+        remove_user = st.selectbox("Select User to Remove", users["username"].values)
+        if st.button("Remove User"):
+            users = users[users["username"]!=remove_user]
+            students = students[students["student_name"]!=remove_user]
+            marks = marks[marks["student"]!=remove_user]
+            results = results[results["student"]!=remove_user]
+            save(users, USERS_FILE)
+            save(students, STUDENTS_FILE)
+            save(marks, MARKS_FILE)
+            save(results, RESULTS_FILE)
+            st.success(f"User {remove_user} removed successfully")
+
+        st.subheader("📚 Students by Class")
+        for cls in CLASSES:
+            st.write(f"**{cls}**")
+            class_students = students[students["class_level"]==cls]
+            st.write(class_students["student_name"].values if not class_students.empty else "No students")
+
+    # --------------------------
+    # TEACHER: ENTER MARKS
+    # --------------------------
     if role=="teacher":
+        selected_class = st.selectbox("Select Class", CLASSES)
+        class_students = students[students["class_level"]==selected_class]
+        if class_students.empty:
+            st.warning("No students in this class")
+            st.stop()
         st.subheader("✏️ Enter Marks for Students")
         selected_student = st.selectbox("Select Student", class_students["student_name"].values)
         term = st.selectbox("Select Term", TERMS)
         comp_marks = {}
         st.markdown("**Compulsory Subjects**")
-        for subj in COMPULSORY[:-1]:  # skip last for handling optional humanities
+        for subj in COMPULSORY[:-1]:
             comp_marks[subj] = st.number_input(f"{subj} Marks", min_value=0, max_value=100, value=0, key=f"{selected_student}_{subj}")
         # Humanities
         humanity_subject = st.selectbox("Select One Humanity", GROUP_HUMANITIES)
@@ -270,7 +295,6 @@ elif role in ["teacher","admin"]:
 
         if st.button("Save Marks"):
             new_entries=[]
-            # Compulsory
             for subj, mark in comp_marks.items():
                 marks = marks[~((marks["student"]==selected_student) & (marks["term"]==term) & (marks["subject"]==subj))]
                 new_entries.append({"student":selected_student,"class_level":selected_class,"term":term,"subject":subj,"marks":mark})
@@ -284,9 +308,13 @@ elif role in ["teacher","admin"]:
             save(marks, MARKS_FILE)
             st.success(f"Marks saved for {selected_student} for {term}")
 
-    # Class Marks and AI Predictions
+    # --------------------------
+    # CLASS MARKS & PREDICTIONS
+    # --------------------------
     st.subheader("📊 Student Marks & AI Predictions")
     table_data=[]
+    selected_class_analysis = st.selectbox("Select Class for Analysis", CLASSES, key="analysis_class")
+    class_students = students[students["class_level"]==selected_class_analysis]
     for student in class_students["student_name"].values:
         student_marks = marks[marks["student"]==student]
         latest_term_marks = student_marks[student_marks["term"]==TERMS[-1]]
@@ -314,17 +342,14 @@ elif role in ["teacher","admin"]:
     class_df=pd.DataFrame(table_data)
     st.dataframe(class_df)
 
-    # Bar Chart
-    st.subheader("📊 Class Expected Mean Marks")
     fig, ax = plt.subplots(figsize=(10,5))
     ax.bar(class_df["Student"], class_df["Expected Mean"], color='green')
-    ax.set_ylabel("Expected Mean"); ax.set_xlabel("Student"); ax.set_title(f"Class {selected_class} Predictions")
+    ax.set_ylabel("Expected Mean"); ax.set_xlabel("Student"); ax.set_title(f"Class {selected_class_analysis} Predictions")
     ax.set_ylim(0,100)
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
-    # Summary
-    st.subheader("🔮 Summary Predictions")
     overall_expected_mean = class_df["Expected Mean"].mean() if not class_df.empty else 0
+    st.subheader("🔮 Summary Predictions")
     st.metric("Class Expected Mean Mark", round(overall_expected_mean,2))
     st.metric("Class Expected Grade", grade(overall_expected_mean))
