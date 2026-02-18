@@ -21,19 +21,15 @@ TERMS = ["Term 1", "Term 2", "Term 3"]
 TERM_ORDER = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
 CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
 
-# ==========================
-# SUBJECTS
-# ==========================
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry", "Biology"]
 GROUP_1 = ["Physics", "CRE", "IRE", "HRE"]
 GROUP_2 = ["History", "Geography"]
 GROUP_3 = ["Business", "Agriculture", "Computer", "French", "German", "Arabic"]
 GROUP_4 = ["Wood Technology", "Metal Work", "Building Construction", "Electricity"]
-
 ALL_SUBJECTS = COMPULSORY + GROUP_1 + GROUP_2 + GROUP_3 + GROUP_4
 
 # ==========================
-# UTILS
+# UTILITIES
 # ==========================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -63,6 +59,7 @@ def load():
     marks = safe_columns(marks, ["student","class_level","term","subject","marks"])
     results = safe_columns(results, ["student","class_level","term","total","average","grade","rank"])
     attendance = safe_columns(attendance, ["student","class_level","term","days_present","total_days","attendance_percent"])
+
     return users, students, marks, results, attendance
 
 def grade(avg):
@@ -75,31 +72,51 @@ def grade(avg):
 # ==========================
 # CREATE FILES IF NOT EXIST
 # ==========================
-# ensure default admin exists
+# Default admin: unremovable
 create_file(USERS_FILE, ["username","password","role","subject"], [["admin", hash_password("1234"), "admin", ""]])
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
 create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
 create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
 
+users, students, marks, results, attendance = load()
+
 # ==========================
-# LOGIN
+# LOGIN OR FORGOT PASSWORD
 # ==========================
 if "user" not in st.session_state:
     st.title("🎓 Zein School ERP Login")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    if st.button("Login"):
-        users, students, marks, results, attendance = load()
-        match = users[(users["username"]==u) & (users["password"]==hash_password(p))]
-        if not match.empty:
-            st.session_state.user = match.iloc[0].to_dict()
-            st.experimental_rerun()
-        else:
-            st.error("Invalid login")
+    st.write("---")
+
+    tab_login, tab_forget = st.tabs(["Login", "Forgot Password"])
+    
+    with tab_login:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            match = users[(users["username"]==username) & (users["password"]==hash_password(password))]
+            if not match.empty:
+                st.session_state.user = match.iloc[0].to_dict()
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+    
+    with tab_forget:
+        username_fp = st.text_input("Enter your username")
+        question = st.text_input("Security Question: Who is Zein?")
+        if st.button("Reset Password"):
+            if username_fp not in users["username"].values:
+                st.error("Username not found")
+            elif question.strip().lower() != "zeiniszein":
+                st.error("Incorrect answer")
+            else:
+                new_pass = st.text_input("Enter new password", type="password", key="new_pass")
+                if new_pass and st.button("Save New Password", key="save_new_pass"):
+                    users.loc[users["username"]==username_fp, "password"] = hash_password(new_pass)
+                    save(users, USERS_FILE)
+                    st.success("Password reset successfully")
     st.stop()
 
-users, students, marks, results, attendance = load()
 user = st.session_state.user
 role = user["role"]
 
@@ -115,11 +132,11 @@ if role=="admin":
     st.header("🛠 Admin Dashboard")
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Add Student","Add Teacher","Add Admin","View Users","Manage Users"])
 
-    # -------- Add Student --------
+    # ---- Add Student ----
     with tab1:
         st.subheader("➕ Add Student")
-        name = st.text_input("Student Name", key="add_student_name")
-        cls = st.selectbox("Class Level", CLASSES, key="add_student_class")
+        name = st.text_input("Student Name", key="student_add")
+        cls = st.selectbox("Class Level", CLASSES, key="student_class_add")
         if st.button("Add Student"):
             if not name: st.error("Enter name")
             elif name in students["student_name"].values: st.error("Student exists")
@@ -133,37 +150,39 @@ if role=="admin":
                 st.success(f"Student {name} added with password 1234")
                 st.experimental_rerun()
 
-    # -------- Add Teacher --------
+    # ---- Add Teacher ----
     with tab2:
         st.subheader("➕ Add Teacher")
         subject = st.selectbox("Subject", ALL_SUBJECTS, key="teacher_subject")
-        number = st.number_input("Teacher Number",1,20,1,key="teacher_number")
+        number = st.number_input("Teacher Number",1,50,1, key="teacher_number")
         username = f"{subject.lower()}{number}"
         st.info(f"Username: {username}")
         if st.button("Add Teacher"):
             if username in users["username"].values: st.error("Teacher exists")
             else:
-                new_user = pd.DataFrame([{"username": username,"password":hash_password("1234"),"role":"teacher","subject":subject}])
+                new_user = pd.DataFrame([{"username": username,"password":hash_password("1234"),
+                                          "role":"teacher","subject":subject}])
                 users = pd.concat([users,new_user],ignore_index=True)
                 save(users,USERS_FILE)
                 st.success(f"Teacher {username} added with password 1234")
                 st.experimental_rerun()
 
-    # -------- Add Admin --------
+    # ---- Add Admin ----
     with tab3:
         st.subheader("➕ Add Admin")
-        new_admin = st.text_input("New Admin Username", key="new_admin_username")
+        new_admin = st.text_input("New Admin Username")
         if st.button("Add Admin"):
             if not new_admin: st.error("Enter username")
-            elif new_admin in users["username"].values: st.error("User exists")
+            elif new_admin in users["username"].values: st.error("Username exists")
             else:
-                admin_user = pd.DataFrame([{"username": new_admin,"password":hash_password("1234"),"role":"admin","subject":""}])
-                users = pd.concat([users, admin_user], ignore_index=True)
-                save(users, USERS_FILE)
+                new_user = pd.DataFrame([{"username": new_admin,"password":hash_password("1234"),
+                                          "role":"admin","subject":""}])
+                users = pd.concat([users,new_user],ignore_index=True)
+                save(users,USERS_FILE)
                 st.success(f"Admin {new_admin} added with password 1234")
                 st.experimental_rerun()
 
-    # -------- View Users --------
+    # ---- View Users ----
     with tab4:
         st.subheader("👥 All Users")
         if not users.empty:
@@ -176,15 +195,14 @@ if role=="admin":
             col2.metric("Teachers", len(users[users["role"]=="teacher"]))
             col3.metric("Students", len(users[users["role"]=="student"]))
 
-    # -------- Manage Users --------
+    # ---- Manage Users ----
     with tab5:
-        st.subheader("🗑 Remove User")
-        removable_users = users[users["role"]!="admin"]["username"].values
-        if len(removable_users)==0:
-            st.info("No removable users")
-        else:
-            remove_user = st.selectbox("Select User", removable_users)
-            if st.button("Remove User"):
+        st.subheader("🗑 Remove User (Admin cannot remove default admin)")
+        remove_user = st.selectbox("Select User", users["username"].values)
+        if st.button("Remove User"):
+            if remove_user=="admin":
+                st.error("Default admin cannot be removed!")
+            else:
                 users = users[users["username"]!=remove_user]
                 save(users,USERS_FILE)
                 st.success(f"User {remove_user} removed")
@@ -230,10 +248,8 @@ elif role=="teacher":
                 df.insert(0,"student",selected_student)
                 marks_updated = pd.concat([marks_filtered,df],ignore_index=True)
                 save(marks_updated,MARKS_FILE)
-
                 total = df["marks"].sum()
                 avg = df["marks"].mean()
-
                 results_filtered = results_fresh[~((results_fresh["student"]==selected_student)&
                                                    (results_fresh["term"]==selected_term)&
                                                    (results_fresh["class_level"]==selected_class))]
@@ -281,7 +297,7 @@ elif role=="teacher":
                 st.error(str(e))
 
 # ==========================
-# STUDENT DASHBOARD
+# STUDENT DASHBOARD (AI)
 # ==========================
 elif role=="student":
     st.header("📊 Student AI Dashboard")
@@ -291,17 +307,13 @@ elif role=="student":
     student_attendance = attendance[attendance["student"]==student_name]
     if student_results.empty: st.warning("No results yet"); st.stop()
 
-    # Performance Trend
     st.subheader("📈 Performance Trend")
     history = student_results.copy()
     history["term_order"] = history["term"].map(TERM_ORDER)
     history = history.sort_values("term_order")
-
     fig, ax = plt.subplots()
     ax.bar(history["term"], history["average"], color='skyblue')
-    ax.set_ylabel("Average Score")
-    ax.set_xlabel("Term")
-    ax.set_title("Performance Over Time")
+    ax.set_ylabel("Average Score"); ax.set_xlabel("Term"); ax.set_title("Performance Over Terms")
     st.pyplot(fig)
 
     # Prediction
@@ -312,13 +324,13 @@ elif role=="student":
         model.fit(X,y)
         pred = model.predict([[len(history)]])[0]
         pred = max(0,min(100,pred))
-        col1,col2 = st.columns(2)
+        st.subheader("🔮 Next Term Prediction")
+        col1,col2,col3 = st.columns(3)
         col1.metric("Predicted Average", round(pred,2))
         col2.metric("Predicted Grade", grade(pred))
-        avg_score = history["average"].mean()
-        st.metric("Average Score So Far", round(avg_score,2))
+        col3.metric("Current Average", round(history["average"].mean(),2))
 
-    # Weak/Strong Subjects
+    # Weak Subject
     latest_term = history.iloc[-1]["term"]
     latest_marks = student_marks[student_marks["term"]==latest_term]
     if not latest_marks.empty:
