@@ -75,6 +75,7 @@ def grade(avg):
 # ==========================
 # CREATE FILES IF NOT EXIST
 # ==========================
+# ensure default admin exists
 create_file(USERS_FILE, ["username","password","role","subject"], [["admin", hash_password("1234"), "admin", ""]])
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
@@ -112,8 +113,9 @@ if st.sidebar.button("Logout"):
 # ==========================
 if role=="admin":
     st.header("🛠 Admin Dashboard")
-    tab1, tab2, tab3, tab4 = st.tabs(["Add Student","Add Teacher","View Users","Manage Users"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Add Student","Add Teacher","Add Admin","View Users","Manage Users"])
 
+    # -------- Add Student --------
     with tab1:
         st.subheader("➕ Add Student")
         name = st.text_input("Student Name", key="add_student_name")
@@ -131,6 +133,7 @@ if role=="admin":
                 st.success(f"Student {name} added with password 1234")
                 st.experimental_rerun()
 
+    # -------- Add Teacher --------
     with tab2:
         st.subheader("➕ Add Teacher")
         subject = st.selectbox("Subject", ALL_SUBJECTS, key="teacher_subject")
@@ -146,7 +149,22 @@ if role=="admin":
                 st.success(f"Teacher {username} added with password 1234")
                 st.experimental_rerun()
 
+    # -------- Add Admin --------
     with tab3:
+        st.subheader("➕ Add Admin")
+        new_admin = st.text_input("New Admin Username", key="new_admin_username")
+        if st.button("Add Admin"):
+            if not new_admin: st.error("Enter username")
+            elif new_admin in users["username"].values: st.error("User exists")
+            else:
+                admin_user = pd.DataFrame([{"username": new_admin,"password":hash_password("1234"),"role":"admin","subject":""}])
+                users = pd.concat([users, admin_user], ignore_index=True)
+                save(users, USERS_FILE)
+                st.success(f"Admin {new_admin} added with password 1234")
+                st.experimental_rerun()
+
+    # -------- View Users --------
+    with tab4:
         st.subheader("👥 All Users")
         if not users.empty:
             display = users[["username","role","subject"]].copy()
@@ -158,9 +176,10 @@ if role=="admin":
             col2.metric("Teachers", len(users[users["role"]=="teacher"]))
             col3.metric("Students", len(users[users["role"]=="student"]))
 
-    with tab4:
+    # -------- Manage Users --------
+    with tab5:
         st.subheader("🗑 Remove User")
-        removable_users = users[users["username"]!="admin"]["username"].values
+        removable_users = users[users["role"]!="admin"]["username"].values
         if len(removable_users)==0:
             st.info("No removable users")
         else:
