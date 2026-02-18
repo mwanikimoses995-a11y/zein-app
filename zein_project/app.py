@@ -148,26 +148,7 @@ if role=="student":
     st.pyplot(fig)
 
     # --------------------------
-    # AI Prediction for Next Term
-    # --------------------------
-    if len(history)>=2:
-        X = np.arange(len(history)).reshape(-1,1)
-        y = history["average"].values
-        model = LinearRegression()
-        model.fit(X,y)
-        pred_next_avg = model.predict([[len(history)]])[0]
-        pred_next_avg = max(0,min(100,pred_next_avg))
-        
-        # Predicted future mean considering next term
-        future_mean = np.append(y, pred_next_avg).mean()
-        st.subheader("🔮 AI Predictions for Next Term")
-        col1,col2,col3 = st.columns(3)
-        col1.metric("Predicted Next Term Avg", round(pred_next_avg,2))
-        col2.metric("Expected Grade", grade(pred_next_avg))
-        col3.metric("Expected Future Mean", round(future_mean,2))
-
-    # --------------------------
-    # Latest Term Subject Marks
+    # Subject-wise Latest Marks
     # --------------------------
     latest_term = history.iloc[-1]["term"]
     latest_marks = student_marks[student_marks["term"]==latest_term]
@@ -189,18 +170,36 @@ if role=="student":
         st.error(f"Weakest Subject: {weakest['subject']} ({weakest['marks']}%)")
         st.success(f"Strongest Subject: {strongest['subject']} ({strongest['marks']}%)")
 
-        advice = ""
-        if weakest["marks"]<50: advice += f"Focus on {weakest['subject']} daily. "
-        elif weakest["marks"]<60: advice += f"Review {weakest['subject']} weekly. "
-        if len(history)>=2:
-            if pred_next_avg>=75: advice += "Keep up the good work! "
-            elif pred_next_avg<60: advice += "Increase study and seek help."
-        st.info(f"🤖 AI Advice: {advice}")
+    # --------------------------
+    # AI Prediction per Subject for Next Term
+    # --------------------------
+    st.subheader("🔮 AI Predictions for Next Term")
+    predicted_marks = []
+    if len(history) >= 2:
+        subjects = student_marks["subject"].unique()
+        for subj in subjects:
+            subj_data = student_marks[student_marks["subject"]==subj].copy()
+            subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
+            subj_data = subj_data.sort_values("term_order")
+            X = np.arange(len(subj_data)).reshape(-1,1)
+            y = subj_data["marks"].values
+            model = LinearRegression()
+            model.fit(X,y)
+            pred = model.predict([[len(subj_data)]])[0]
+            pred = max(0,min(100,pred))
+            predicted_marks.append({"subject": subj, "predicted_marks": round(pred,2)})
+
+        pred_df = pd.DataFrame(predicted_marks)
+        st.dataframe(pred_df)
+
+        expected_mean = pred_df["predicted_marks"].mean()
+        st.metric("Expected Mean Mark", round(expected_mean,2))
+        st.metric("Expected Grade", grade(expected_mean))
 
     # --------------------------
     # Subject Trends Across Terms
     # --------------------------
-    if len(history)>1:
+    if len(history) > 1:
         st.subheader("📊 Subject Trends Across Terms")
         subjects = student_marks["subject"].unique()
         fig3, ax3 = plt.subplots(figsize=(12,6))
