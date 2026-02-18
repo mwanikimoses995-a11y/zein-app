@@ -1,228 +1,185 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
-import os
-import hashlib
-import numpy as np
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Advanced School ERP AI", layout="wide")
+# -------------------- CONFIG --------------------
+st.set_page_config(page_title="Attendance & Performance System", layout="wide")
 
-# ==========================
-# FILES
-# ==========================
-USERS_FILE = "users.csv"
-STUDENTS_FILE = "students.csv"
-MARKS_FILE = "marks.csv"
-RESULTS_FILE = "results.csv"
-ATTENDANCE_FILE = "attendance.csv"
+DB_NAME = "database.db"
 
-TERMS = ["Term 1", "Term 2", "Term 3"]
-CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
-SUBJECTS = ["English", "Mathematics", "Kiswahili", "Biology", "Chemistry", "Physics"]
+# -------------------- DATABASE --------------------
+def get_connection():
+    return sqlite3.connect(DB_NAME, check_same_thread=False)
 
-# ==========================
-# UTILITIES
-# ==========================
-def hash_password(p): 
-    return hashlib.sha256(p.encode()).hexdigest()
+def init_db():
+    conn = get_connection()
+    c = conn.cursor()
 
-def create_file(file, cols, default=None):
-    if not os.path.exists(file):
-        pd.DataFrame(default if default else [], columns=cols).to_csv(file, index=False)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        subject TEXT
+    )
+    """)
 
-def save(df, file): 
-    df.to_csv(file, index=False)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        attendance REAL NOT NULL,
+        score REAL NOT NULL
+    )
+    """)
 
-def grade(avg):
-    if avg >= 80: return "A"
-    elif avg >= 70: return "B"
-    elif avg >= 60: return "C"
-    elif avg >= 50: return "D"
-    return "E"
+    # default admin
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users VALUES (?,?,?,?)",
+            ("admin", "admin", "admin", None)
+        )
 
-# ==========================
-# CREATE FILES
-# ==========================
-create_file(USERS_FILE, ["username","password","role","subject"],
-            [["admin", hash_password("1234"), "admin", ""]])
-create_file(STUDENTS_FILE, ["student_name","class_level"])
-create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
-create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade"])
-create_file(ATTENDANCE_FILE, ["student","class_level","term","attendance_percent"])
+    conn.commit()
+    conn.close()
 
-users = pd.read_csv(USERS_FILE)
-students = pd.read_csv(STUDENTS_FILE)
-marks = pd.read_csv(MARKS_FILE)
-results = pd.read_csv(RESULTS_FILE)
-attendance = pd.read_csv(ATTENDANCE_FILE)
+init_db()
 
-# ==========================
-# LOGIN
-# ==========================
+# -------------------- AUTH --------------------
+def login(username, password):
+    conn = get_connection()
+    df = pd.read_sql(
+        "SELECT * FROM users WHERE username=? AND password=?",
+        conn,
+        params=(username, password)
+    )
+    conn.close()
+    return None if df.empty else df.iloc[0].to_dict()
+
+# -------------------- LOGIN UI --------------------
 if "user" not in st.session_state:
-    st.title("🎓 Zein School ERP Login")
+    st.title("🔐 Login")
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
 
-    if st.button("Login"):
-        m = users[(users.username==u)&(users.password==hash_password(p))]
-        if not m.empty:
-            st.session_state.user = m.iloc[0].to_dict()
-            st.experimental_rerun()
+    if submit:
+        user = login(username, password)
+        if user:
+            st.session_state.user = user
+            st.rerun()
         else:
-            st.error("Invalid login")
+            st.error("Invalid credentials")
+
     st.stop()
 
 user = st.session_state.user
-role = user["role"]
 
-st.sidebar.write(f"👤 {user['username']} ({role})")
-if st.sidebar.button("Logout"):
-    del st.session_state.user
-    st.experimental_rerun()
+# -------------------- ADMIN --------------------
+if user["role"] == "admin":
+    st.title("🛠️ Admin Dashboard")
 
-# ==========================
-# STUDENT DASHBOARD
-# ==========================
-if role == "student":
-    st.header("📊 Student Dashboard")
+    tab1, tab2, tab3 = st.tabs(["Add Teacher", "Add Student", "Analytics"])
 
-    name = user["username"]
-    my_results = results[results.student == name]
-    my_att = attendance[attendance.student == name]
+    # ---- ADD TEACHER ----
+    with tab1:
+        subject = st.text_input("Subject Name (Teacher Username)")
+        if st.button("Add Teacher"):
+            if subject:
+                try:
+                    conn = get_connection()
+                    conn.execute(
+                        "INSERT INTO users VALUES (?,?,?,?)",
+                        (subject, "1234", "teacher", subject)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Teacher '{subject}' added")
+                except sqlite3.IntegrityError:
+                    st.error("Teacher already exists")
 
-    if my_results.empty:
-        st.warning("No results yet")
-        st.stop()
+    # ---- ADD STUDENT ----
+    with tab2:
+        student = st.text_input("Student Name (Username)")
+        if st.button("Add Student"):
+            if student:
+                try:
+                    conn = get_connection()
+                    conn.execute(
+                        "INSERT INTO users VALUES (?,?,?,?)",
+                        (student, "1234", "student", None)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Student '{student}' added")
+                except sqlite3.IntegrityError:
+                    st.error("Student already exists")
 
-    st.subheader("📘 Term Results")
-    st.dataframe(my_results)
+    # ---- ANALYTICS ----
+    with tab3:
+        conn = get_connection()
+        df = pd.read_sql("SELECT * FROM records", conn)
+        conn.close()
 
-    st.subheader("📋 Attendance")
-    st.dataframe(my_att)
+        if len(df) > 1:
+            corr = df["attendance"].corr(df["score"])
+            st.metric("Attendance–Performance Correlation", round(corr, 3))
+            st.scatter_chart(df, x="attendance", y="score")
+        else:
+            st.info("Not enough data for correlation")
 
-    merged = pd.merge(my_results, my_att, on=["student","class_level","term"], how="inner")
+# -------------------- TEACHER --------------------
+elif user["role"] == "teacher":
+    st.title(f"📚 Teacher Dashboard — {user['subject']}")
 
-    if len(merged) > 1:
-        corr = merged["attendance_percent"].corr(merged["average"])
+    with st.form("entry_form"):
+        student = st.text_input("Student Name")
+        attendance = st.number_input("Attendance (%)", 0.0, 100.0)
+        score = st.number_input("Performance Score", 0.0, 100.0)
+        submit = st.form_submit_button("Save")
 
-        st.subheader("📈 Attendance vs Performance")
-        fig, ax = plt.subplots()
-        ax.scatter(merged["attendance_percent"], merged["average"])
-        ax.set_xlabel("Attendance %")
-        ax.set_ylabel("Average Marks")
-        ax.set_title(f"Correlation: {corr:.2f}")
-        st.pyplot(fig)
-
-# ==========================
-# ADMIN DASHBOARD
-# ==========================
-elif role == "admin":
-    st.header("🛠 Admin Dashboard")
-
-    name = st.text_input("Student Name")
-    cls = st.selectbox("Class", CLASSES)
-
-    if st.button("Add Student"):
-        if name not in users.username.values:
-            students.loc[len(students)] = [name, cls]
-            users.loc[len(users)] = [name, hash_password("1234"), "student", ""]
-            save(students, STUDENTS_FILE)
-            save(users, USERS_FILE)
-            st.success("Student added")
-
-    st.subheader("👥 Users")
-    st.dataframe(users)
-
-# ==========================
-# TEACHER DASHBOARD
-# ==========================
-elif role == "teacher":
-
-    st.header("👩‍🏫 Teacher Dashboard")
-
-    cls = st.selectbox("Class", CLASSES)
-    term = st.selectbox("Term", TERMS)
-
-    class_students = students[students.class_level == cls]
-    if class_students.empty:
-        st.warning("No students")
-        st.stop()
-
-    # ==========================
-    # MARKS ENTRY
-    # ==========================
-    table = []
-    for s in class_students.student_name:
-        row = {"Student": s}
-        for sub in SUBJECTS:
-            ex = marks[(marks.student==s)&(marks.term==term)&(marks.subject==sub)]
-            row[sub] = int(ex.marks.iloc[0]) if not ex.empty else 0
-        table.append(row)
-
-    df = pd.DataFrame(table)
-    edited = st.data_editor(df, num_rows="fixed")
-
-    # ==========================
-    # ATTENDANCE ENTRY
-    # ==========================
-    st.subheader("📋 Attendance (%)")
-
-    att_data = {}
-    for s in class_students.student_name:
-        ex = attendance[(attendance.student==s)&(attendance.term==term)]
-        att_data[s] = st.number_input(
-            f"{s}", 0, 100, 
-            int(ex.attendance_percent.iloc[0]) if not ex.empty else 0
+    if submit and student:
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO records (student, subject, attendance, score) VALUES (?,?,?,?)",
+            (student, user["subject"], attendance, score)
         )
+        conn.commit()
+        conn.close()
+        st.success("Record saved")
 
-    # ==========================
-    # SAVE ALL
-    # ==========================
-    if st.button("💾 Save Marks & Attendance"):
-
-        marks.drop(marks[(marks.class_level==cls)&(marks.term==term)].index, inplace=True)
-        results.drop(results[(results.class_level==cls)&(results.term==term)].index, inplace=True)
-        attendance.drop(attendance[(attendance.class_level==cls)&(attendance.term==term)].index, inplace=True)
-
-        for _, r in edited.iterrows():
-            scores = []
-            for sub in SUBJECTS:
-                marks.loc[len(marks)] = [r["Student"], cls, term, sub, r[sub]]
-                scores.append(r[sub])
-
-            avg = sum(scores)/len(scores)
-            results.loc[len(results)] = [
-                r["Student"], cls, term, sum(scores), round(avg,2), grade(avg)
-            ]
-
-            attendance.loc[len(attendance)] = [
-                r["Student"], cls, term, att_data[r["Student"]]
-            ]
-
-        save(marks, MARKS_FILE)
-        save(results, RESULTS_FILE)
-        save(attendance, ATTENDANCE_FILE)
-
-        st.success("Saved successfully")
-
-    # ==========================
-    # CLASS CORRELATION
-    # ==========================
-    merged = pd.merge(
-        results[(results.class_level==cls)&(results.term==term)],
-        attendance[(attendance.class_level==cls)&(attendance.term==term)],
-        on=["student","class_level","term"]
+    conn = get_connection()
+    df = pd.read_sql(
+        "SELECT student, attendance, score FROM records WHERE subject=?",
+        conn,
+        params=(user["subject"],)
     )
+    conn.close()
 
-    if len(merged) > 1:
-        corr = merged["attendance_percent"].corr(merged["average"])
+    st.dataframe(df)
 
-        st.subheader("📊 Class Attendance–Performance Correlation")
-        fig, ax = plt.subplots()
-        ax.scatter(merged["attendance_percent"], merged["average"])
-        ax.set_xlabel("Attendance %")
-        ax.set_ylabel("Average Marks")
-        ax.set_title(f"Correlation: {corr:.2f}")
-        st.pyplot(fig)
+# -------------------- STUDENT --------------------
+elif user["role"] == "student":
+    st.title(f"🎓 Student Dashboard — {user['username']}")
+
+    conn = get_connection()
+    df = pd.read_sql(
+        "SELECT subject, attendance, score FROM records WHERE student=?",
+        conn,
+        params=(user["username"],)
+    )
+    conn.close()
+
+    if df.empty:
+        st.info("No records yet")
+    else:
+        st.dataframe(df)
+        st.metric("Average Attendance", f"{df.attendance.mean():.1f}%")
+        st.metric("Average Score", f"{df.score.mean():.1f}")
+
+# -------------------- LOGOUT --------------------
+st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
