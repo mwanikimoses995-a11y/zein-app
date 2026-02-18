@@ -5,7 +5,7 @@ import hashlib
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="School System", layout="wide")
+st.set_page_config(page_title="Advanced School ERP", layout="wide")
 
 # =====================================================
 # FILES
@@ -13,56 +13,45 @@ st.set_page_config(page_title="School System", layout="wide")
 USERS_FILE = "users.csv"
 STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
+RESULTS_FILE = "results.csv"
 ATTENDANCE_FILE = "attendance.csv"
-RESULTS_FILE = "term_results.csv"
 
 # =====================================================
-# SUBJECT STRUCTURE
+# CONFIG
 # =====================================================
+TERMS = ["Term 1", "Term 2", "Term 3"]
+CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
+
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry", "Biology"]
 GROUP_1 = ["CRE", "Physics"]
 GROUP_2 = ["History", "Geography"]
 GROUP_3 = ["Business", "Agriculture", "French", "HomeScience", "Computer"]
+
 ALL_SUBJECTS = COMPULSORY + GROUP_1 + GROUP_2 + GROUP_3
 
 # =====================================================
-# PASSWORD HASH
+# UTILITIES
 # =====================================================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# =====================================================
-# CREATE FILES
-# =====================================================
-def create_file(file, columns, data=None):
+def create_file(file, columns, default=None):
     if not os.path.exists(file):
-        pd.DataFrame(data if data else [], columns=columns).to_csv(file, index=False)
-
-create_file(USERS_FILE, ["username", "password", "role", "subject"], [["admin", hash_password("12345"), "admin", ""]])
-create_file(STUDENTS_FILE, ["student_name"])
-create_file(MARKS_FILE, ["student", "subject", "marks"])
-create_file(ATTENDANCE_FILE, ["student", "attendance_percent"])
-create_file(RESULTS_FILE, ["student", "total_marks", "average", "grade"])
-
-# =====================================================
-# LOAD & SAVE
-# =====================================================
-def load_all():
-    return (
-        pd.read_csv(USERS_FILE),
-        pd.read_csv(STUDENTS_FILE),
-        pd.read_csv(MARKS_FILE),
-        pd.read_csv(ATTENDANCE_FILE),
-        pd.read_csv(RESULTS_FILE),
-    )
+        pd.DataFrame(default if default else [], columns=columns).to_csv(file, index=False)
 
 def save(df, file):
     df.to_csv(file, index=False)
 
-# =====================================================
-# GRADE FUNCTION
-# =====================================================
-def calculate_grade(avg):
+def load():
+    return (
+        pd.read_csv(USERS_FILE),
+        pd.read_csv(STUDENTS_FILE),
+        pd.read_csv(MARKS_FILE),
+        pd.read_csv(RESULTS_FILE),
+        pd.read_csv(ATTENDANCE_FILE)
+    )
+
+def grade(avg):
     if avg >= 80: return "A"
     elif avg >= 70: return "B"
     elif avg >= 60: return "C"
@@ -70,280 +59,223 @@ def calculate_grade(avg):
     else: return "E"
 
 # =====================================================
-# LOAD DATA
+# INITIALIZE FILES
 # =====================================================
-users, students, marks, attendance, results = load_all()
+create_file(USERS_FILE, ["username","password","role","subject"],
+            [["admin", hash_password("12345"), "admin", ""]])
+
+create_file(STUDENTS_FILE, ["student_name","class_level"])
+create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
+create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
+create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
+
+users, students, marks, results, attendance = load()
 
 # =====================================================
-# LOGIN / FORGOT PASSWORD
+# LOGIN
 # =====================================================
 if "user" not in st.session_state:
 
-    st.title("🎓 School Portal Login")
+    st.title("🎓 Advanced School ERP Login")
 
-    forgot_pw = st.checkbox("Forgot Password?")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
-    if forgot_pw:
-        username = st.text_input("Enter Username", key="fp_username")
-        sec_answer = st.text_input("Security Question: Who is Zein?", key="fp_answer")
-        new_password = st.text_input("Enter New Password", type="password", key="fp_new")
-        confirm_password = st.text_input("Confirm New Password", type="password", key="fp_confirm")
+    if st.button("Login"):
+        match = users[(users.username==u) & (users.password==hash_password(p))]
+        if not match.empty:
+            st.session_state.user = match.iloc[0].to_dict()
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
 
-        if st.button("Reset Password", key="fp_reset"):
-            user_match = users[users.username == username]
-            if user_match.empty:
-                st.error("Username not found")
-            elif sec_answer.strip().lower() != "zeiniszein":
-                st.error("Incorrect answer to security question")
-            elif new_password != confirm_password:
-                st.error("Passwords do not match")
-            elif new_password.strip() == "":
-                st.error("Password cannot be empty")
-            else:
-                users.loc[users.username == username, "password"] = hash_password(new_password)
-                save(users, USERS_FILE)
-                st.success("Password reset successfully! You can now login.")
-        st.stop()
-
-    else:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            hashed = hash_password(password)
-            match = users[(users.username == username) & (users.password == hashed)]
-            if not match.empty:
-                st.session_state.user = match.iloc[0].to_dict()
-                st.rerun()
-            else:
-                st.error("Wrong username or password")
-        st.stop()
+    st.stop()
 
 user = st.session_state.user
 role = user["role"]
 
-st.sidebar.success(f"Logged in as {user['username']} ({role})")
+st.sidebar.success(f"{user['username']} ({role})")
+
 if st.sidebar.button("Logout"):
     del st.session_state.user
     st.rerun()
 
-# Reload data after login/logout
-users, students, marks, attendance, results = load_all()
+users, students, marks, results, attendance = load()
 
 # =====================================================
-# ADMIN PANEL
+# ADMIN DASHBOARD
 # =====================================================
 if role == "admin":
-    st.header("🛠 Admin Dashboard")
-    
-    st.subheader("📋 User Management")
-    col1, col2 = st.columns(2)
-    with col1:
-        new_user = st.text_input("New Username")
-        new_password = st.text_input("Password", type="password")
-        role_select = st.selectbox("Role", ["teacher","student"])
-        subject = st.text_input("Subject (for teacher)") if role_select=="teacher" else ""
-        if st.button("Add User"):
-            if new_user.strip()=="" or new_password.strip()=="":
-                st.error("Username and password cannot be empty")
-            elif new_user in users.username.values:
-                st.error("Username already exists")
-            else:
-                users = pd.concat([users, pd.DataFrame([{
-                    "username":new_user,
-                    "password":hash_password(new_password),
-                    "role":role_select,
-                    "subject":subject
-                }])], ignore_index=True)
-                save(users, USERS_FILE)
-                st.success(f"User '{new_user}' added ✅")
-                st.experimental_rerun()
-    with col2:
-        del_user = st.selectbox("Select User to Remove", users[users.username!="admin"].username)
-        if st.button("Remove User"):
-            users = users[users.username != del_user]
-            save(users, USERS_FILE)
-            st.success(f"User '{del_user}' removed ✅")
-            st.experimental_rerun()
-    st.info(f"Total users (excluding admin): {len(users)-1}")
 
-    st.subheader("👩‍🎓 Student Management")
-    col3, col4 = st.columns(2)
-    with col3:
-        new_student = st.text_input("New Student Name")
-        if st.button("Add Student"):
-            if new_student.strip() == "":
-                st.error("Student name cannot be empty")
-            elif new_student in students.student_name.values:
-                st.error("Student already exists")
-            else:
-                students = pd.concat([students, pd.DataFrame([{"student_name": new_student}])], ignore_index=True)
-                save(students, STUDENTS_FILE)
-                st.success(f"Student '{new_student}' added ✅")
-                st.experimental_rerun()
-    with col4:
-        del_student = st.selectbox("Select Student to Remove", students.student_name)
-        if st.button("Remove Student"):
-            students = students[students.student_name != del_student]
-            # Remove associated marks & results
-            marks = marks[marks.student != del_student]
-            results = results[results.student != del_student]
+    st.header("🛠 Admin Dashboard")
+
+    # ----- Add Student -----
+    st.subheader("Add Student")
+    name = st.text_input("Student Name")
+    class_level = st.selectbox("Class Level", CLASSES)
+
+    if st.button("Add Student"):
+        if name in students.student_name.values:
+            st.error("Student exists")
+        else:
+            students = pd.concat([students, pd.DataFrame([{
+                "student_name": name,
+                "class_level": class_level
+            }])])
             save(students, STUDENTS_FILE)
-            save(marks, MARKS_FILE)
-            save(results, RESULTS_FILE)
-            st.success(f"Student '{del_student}' removed ✅")
-            st.experimental_rerun()
-    st.info(f"Total students: {len(students)}")
+            st.success("Student added")
+            st.rerun()
 
 # =====================================================
-# TEACHER PANEL
+# TEACHER DASHBOARD
 # =====================================================
 elif role == "teacher":
+
     st.header("👩‍🏫 Teacher Dashboard")
 
     if students.empty:
-        st.warning("No students available.")
-    else:
-        tab1, tab2 = st.tabs(["Manual Entry", "Upload CSV"])
+        st.warning("No students found")
+        st.stop()
 
-        # ======== TAB 1: Manual Entry ========
-        with tab1:
-            selected_student = st.selectbox("Select Student", students["student_name"], key="manual_student_select")
-            st.divider()
-            st.subheader("Enter Student Subjects & Marks")
-            student_data = []
+    selected_class = st.selectbox("Select Class", CLASSES)
+    selected_term = st.selectbox("Select Term", TERMS)
 
-            # COMPULSORY SUBJECTS
-            st.markdown("### 📘 Compulsory Subjects")
-            for subject in COMPULSORY:
-                mark = st.number_input(f"{subject} Marks", min_value=0, max_value=100, key=f"{selected_student}_{subject}")
-                student_data.append((subject, mark))
+    class_students = students[students.class_level==selected_class]
 
-            # GROUP 1
-            st.markdown("### 🔬 Choose ONE: CRE or Physics")
-            group1_choice = st.radio("Group 1", GROUP_1, key=f"group1_{selected_student}")
-            mark1 = st.number_input(f"{group1_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group1_choice}")
-            student_data.append((group1_choice, mark1))
+    if class_students.empty:
+        st.warning("No students in this class")
+        st.stop()
 
-            # GROUP 2
-            st.markdown("### 🌍 Choose ONE: History or Geography")
-            group2_choice = st.radio("Group 2", GROUP_2, key=f"group2_{selected_student}")
-            mark2 = st.number_input(f"{group2_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group2_choice}")
-            student_data.append((group2_choice, mark2))
+    selected_student = st.selectbox("Select Student", class_students.student_name)
 
-            # GROUP 3
-            st.markdown("### 💼 Choose ONE Technical Subject")
-            group3_choice = st.radio("Group 3", GROUP_3, key=f"group3_{selected_student}")
-            mark3 = st.number_input(f"{group3_choice} Marks", min_value=0, max_value=100, key=f"{selected_student}_{group3_choice}")
-            student_data.append((group3_choice, mark3))
+    tab1, tab2 = st.tabs(["Marks Entry","Attendance"])
 
-            if st.button("Save Student Marks (Manual Entry)"):
-                # Save marks
-                marks = marks[marks.student != selected_student].copy()
-                new_marks_df = pd.DataFrame(student_data, columns=["subject", "marks"])
-                new_marks_df.insert(0, "student", selected_student)
-                marks = pd.concat([marks, new_marks_df], ignore_index=True)
-                save(marks, MARKS_FILE)
+    # ================= MARKS =================
+    with tab1:
 
-                # Save results
-                student_marks = marks[marks.student == selected_student]
-                total = float(student_marks.marks.sum())
-                average = float(student_marks.marks.mean())
-                grade = calculate_grade(average)
-                results = results[results.student != selected_student].copy()
-                new_result_df = pd.DataFrame([{
-                    "student": selected_student,
-                    "total_marks": total,
-                    "average": round(average,2),
-                    "grade": grade
-                }])
-                results = pd.concat([results, new_result_df], ignore_index=True)
-                save(results, RESULTS_FILE)
-                st.success("Marks saved successfully ✅")
-                st.rerun()
+        student_data = []
 
-        # ======== TAB 2: CSV Upload ========
-        with tab2:
-            st.subheader("📥 Step 1: Download CSV Template")
-            template_rows = []
-            for student in students["student_name"]:
-                for subj in COMPULSORY + [GROUP_1[0], GROUP_2[0], GROUP_3[0]]:
-                    template_rows.append([student, subj, 0])
-            template_df = pd.DataFrame(template_rows, columns=["student","subject","marks"])
-            st.download_button("Download CSV Template", data=template_df.to_csv(index=False), file_name="marks_template.csv", mime="text/csv")
+        for subject in COMPULSORY:
+            m = st.number_input(f"{subject}",0,100,key=f"{subject}")
+            student_data.append((subject,m))
 
-            st.subheader("📤 Step 2: Upload Completed CSV")
-            uploaded_file = st.file_uploader("Upload CSV (student, subject, marks)", type=["csv"])
-            if uploaded_file:
-                uploaded_df = pd.read_csv(uploaded_file)
-                required_columns = {"student","subject","marks"}
-                if not required_columns.issubset(uploaded_df.columns):
-                    st.error("CSV must contain student, subject, marks")
-                else:
-                    uploaded_df = uploaded_df[uploaded_df.student.isin(students["student_name"])]
-                    st.success("File uploaded ✅")
-                    st.dataframe(uploaded_df)
+        g1 = st.radio("Group 1", GROUP_1)
+        student_data.append((g1, st.number_input(f"{g1}",0,100)))
 
-                    if st.button("Save Uploaded Marks (CSV)"):
-                        # Validate groups
-                        error_flag = False
-                        for student in uploaded_df["student"].unique():
-                            s_df = uploaded_df[uploaded_df.student==student]
-                            subjects = s_df.subject.tolist()
-                            if len(subjects) > 8:
-                                st.error(f"{student} has too many subjects")
-                                error_flag=True
-                            if len(set(subjects)&set(GROUP_1))>1 or len(set(subjects)&set(GROUP_2))>1 or len(set(subjects)&set(GROUP_3))>1:
-                                st.error(f"{student} has multiple choices in a group")
-                                error_flag=True
-                        if not error_flag:
-                            for _, row in uploaded_df.iterrows():
-                                marks = marks[~((marks.student==row.student)&(marks.subject==row.subject))].copy()
-                            marks = pd.concat([marks, uploaded_df], ignore_index=True)
-                            save(marks, MARKS_FILE)
+        g2 = st.radio("Group 2", GROUP_2)
+        student_data.append((g2, st.number_input(f"{g2}",0,100)))
 
-                            # Save results
-                            for student in uploaded_df.student.unique():
-                                student_marks = marks[marks.student==student]
-                                total = float(student_marks.marks.sum())
-                                average = float(student_marks.marks.mean())
-                                grade = calculate_grade(average)
-                                results = results[results.student != student].copy()
-                                new_result_df = pd.DataFrame([{
-                                    "student": student,
-                                    "total_marks": total,
-                                    "average": round(average,2),
-                                    "grade": grade
-                                }])
-                                results = pd.concat([results, new_result_df], ignore_index=True)
-                            save(results, RESULTS_FILE)
-                            st.success("All marks saved ✅")
-                            st.rerun()
+        g3 = st.radio("Group 3", GROUP_3)
+        student_data.append((g3, st.number_input(f"{g3}",0,100)))
+
+        if st.button("Save Marks"):
+
+            marks = marks[~((marks.student==selected_student)&
+                            (marks.term==selected_term)&
+                            (marks.class_level==selected_class))]
+
+            df = pd.DataFrame(student_data, columns=["subject","marks"])
+            df.insert(0,"term",selected_term)
+            df.insert(0,"class_level",selected_class)
+            df.insert(0,"student",selected_student)
+
+            marks = pd.concat([marks,df])
+            save(marks, MARKS_FILE)
+
+            total = df.marks.sum()
+            avg = df.marks.mean()
+
+            # Remove old result
+            results = results[~((results.student==selected_student)&
+                                (results.term==selected_term)&
+                                (results.class_level==selected_class))]
+
+            results = pd.concat([results,pd.DataFrame([{
+                "student":selected_student,
+                "class_level":selected_class,
+                "term":selected_term,
+                "total":total,
+                "average":round(avg,2),
+                "grade":grade(avg),
+                "rank":0
+            }])])
+
+            # ===== RANKING SYSTEM =====
+            term_results = results[(results.class_level==selected_class)&
+                                   (results.term==selected_term)]
+
+            term_results = term_results.sort_values("average", ascending=False)
+            term_results["rank"] = range(1, len(term_results)+1)
+
+            results.update(term_results)
+            save(results, RESULTS_FILE)
+
+            st.success("Marks saved & ranking updated")
+            st.rerun()
+
+    # ================= ATTENDANCE =================
+    with tab2:
+
+        total_days = st.number_input("Total Days",1,365,100)
+        present = st.number_input("Days Present",0,total_days)
+
+        if st.button("Save Attendance"):
+
+            percent = round((present/total_days)*100,2)
+
+            attendance = attendance[~((attendance.student==selected_student)&
+                                       (attendance.term==selected_term)&
+                                       (attendance.class_level==selected_class))]
+
+            attendance = pd.concat([attendance,pd.DataFrame([{
+                "student":selected_student,
+                "class_level":selected_class,
+                "term":selected_term,
+                "days_present":present,
+                "total_days":total_days,
+                "attendance_percent":percent
+            }])])
+
+            save(attendance, ATTENDANCE_FILE)
+            st.success("Attendance saved")
+            st.rerun()
 
 # =====================================================
-# STUDENT PANEL
+# STUDENT DASHBOARD
 # =====================================================
 elif role == "student":
-    st.header(f"📊 Results for {user['username']}")
+
+    st.header("📊 Student Dashboard")
+
     student_name = user["username"]
 
+    student_results = results[results.student==student_name]
     student_marks = marks[marks.student==student_name]
-    student_result = results[results.student==student_name]
 
-    if not student_marks.empty:
-        st.subheader("Subject Marks")
-        st.table(student_marks)
-        if len(student_marks) > 1:
-            st.bar_chart(student_marks.set_index("subject")["marks"])
+    if student_results.empty:
+        st.warning("No results yet")
+        st.stop()
 
-    if not student_result.empty:
-        st.metric("Total Marks", student_result.iloc[0]["total_marks"])
-        st.metric("Average", student_result.iloc[0]["average"])
-        st.metric("Grade", student_result.iloc[0]["grade"])
+    selected_term = st.selectbox("Select Term", student_results.term.unique())
 
-    if len(student_marks) > 1:
-        X = np.arange(len(student_marks)).reshape(-1,1)
-        y = student_marks.marks.values
+    term_data = student_results[student_results.term==selected_term]
+
+    st.metric("Average", term_data.iloc[0]["average"])
+    st.metric("Grade", term_data.iloc[0]["grade"])
+    st.metric("Rank in Class", int(term_data.iloc[0]["rank"]))
+
+    # ===== AI PREDICTION BASED ON HISTORY =====
+    if len(student_results) >= 2:
+
+        history = student_results.sort_values("term")
+        X = np.arange(len(history)).reshape(-1,1)
+        y = history.average.values
+
         model = LinearRegression()
         model.fit(X,y)
-        prediction = model.predict([[len(y)]])[0]
-        st.info(f"📈 Predicted next mark: {round(prediction,1)}")
+
+        future_index = [[len(history)]]
+        prediction = model.predict(future_index)[0]
+
+        st.info(f"🤖 Predicted Next Term Average: {round(prediction,2)}")
+        st.info(f"Predicted Grade: {grade(prediction)}")
