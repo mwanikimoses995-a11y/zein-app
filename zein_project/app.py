@@ -22,11 +22,9 @@ TERM_ORDER = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
 CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
 
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry", "Biology"]
-GROUP_1 = ["Physics", "CRE", "IRE", "HRE"]
-GROUP_2 = ["History", "Geography"]
-GROUP_3 = ["Business", "Agriculture", "Computer", "French", "German", "Arabic"]
-GROUP_4 = ["Wood Technology", "Metal Work", "Building Construction", "Electricity"]
-ALL_SUBJECTS = COMPULSORY + GROUP_1 + GROUP_2 + GROUP_3 + GROUP_4
+GROUP_HUMANITIES = ["History", "Geography"]
+GROUP_TECH = ["CRE", "Physics"]
+ALL_SUBJECTS = COMPULSORY + GROUP_HUMANITIES + GROUP_TECH + ["IRE", "HRE", "Business", "Agriculture", "Computer", "French", "German", "Arabic", "Wood Technology", "Metal Work", "Building Construction", "Electricity"]
 
 # ==========================
 # UTILITIES
@@ -213,53 +211,110 @@ if role=="student":
 # ==========================
 # TEACHER / ADMIN DASHBOARD
 # ==========================
-elif role in ["teacher", "admin"]:
+elif role in ["teacher","admin"]:
     st.header(f"👩‍🏫 {role.capitalize()} Dashboard")
     users, students, marks, results, attendance = load_data()
+
+    # Admin: Add Users
+    if role=="admin":
+        st.subheader("➕ Add Users")
+        user_type = st.selectbox("User Type", ["Student","Teacher"])
+        if user_type=="Student":
+            student_name = st.text_input("Student Full Name")
+            class_level = st.selectbox("Class Level", CLASSES)
+            if st.button("Add Student"):
+                if student_name and class_level:
+                    if student_name in students["student_name"].values:
+                        st.warning("Student already exists")
+                    else:
+                        students = pd.concat([students,pd.DataFrame([{"student_name":student_name,"class_level":class_level}])], ignore_index=True)
+                        users = pd.concat([users,pd.DataFrame([{"username":student_name,"password":hash_password("1234"),"role":"student","subject":""}])], ignore_index=True)
+                        save(students, STUDENTS_FILE)
+                        save(users, USERS_FILE)
+                        st.success(f"Student {student_name} added successfully")
+
+        if user_type=="Teacher":
+            subject = st.text_input("Subject")
+            number = st.text_input("Number / ID")
+            if st.button("Add Teacher"):
+                if subject and number:
+                    username = f"{subject}{number}"
+                    if username in users["username"].values:
+                        st.warning("Teacher already exists")
+                    else:
+                        users = pd.concat([users,pd.DataFrame([{"username":username,"password":hash_password("1234"),"role":"teacher","subject":subject}])], ignore_index=True)
+                        save(users, USERS_FILE)
+                        st.success(f"Teacher {username} added successfully")
+
     selected_class = st.selectbox("Select Class", CLASSES)
     class_students = students[students["class_level"]==selected_class]
     if class_students.empty:
         st.warning("No students in this class")
         st.stop()
 
+    # Teacher: Enter Marks
+    if role=="teacher":
+        st.subheader("✏️ Enter Marks for Students")
+        selected_student = st.selectbox("Select Student", class_students["student_name"].values)
+        term = st.selectbox("Select Term", TERMS)
+        comp_marks = {}
+        st.markdown("**Compulsory Subjects**")
+        for subj in COMPULSORY[:-1]:  # skip last for handling optional humanities
+            comp_marks[subj] = st.number_input(f"{subj} Marks", min_value=0, max_value=100, value=0, key=f"{selected_student}_{subj}")
+        # Humanities
+        humanity_subject = st.selectbox("Select One Humanity", GROUP_HUMANITIES)
+        humanity_mark = st.number_input(f"{humanity_subject} Marks", min_value=0, max_value=100, value=0)
+        # Technical
+        technical_subject = st.selectbox("Select One Technical", GROUP_TECH)
+        technical_mark = st.number_input(f"{technical_subject} Marks", min_value=0, max_value=100, value=0)
+
+        if st.button("Save Marks"):
+            new_entries=[]
+            # Compulsory
+            for subj, mark in comp_marks.items():
+                marks = marks[~((marks["student"]==selected_student) & (marks["term"]==term) & (marks["subject"]==subj))]
+                new_entries.append({"student":selected_student,"class_level":selected_class,"term":term,"subject":subj,"marks":mark})
+            # Humanities
+            marks = marks[~((marks["student"]==selected_student) & (marks["term"]==term) & (marks["subject"]==humanity_subject))]
+            new_entries.append({"student":selected_student,"class_level":selected_class,"term":term,"subject":humanity_subject,"marks":humanity_mark})
+            # Technical
+            marks = marks[~((marks["student"]==selected_student) & (marks["term"]==term) & (marks["subject"]==technical_subject))]
+            new_entries.append({"student":selected_student,"class_level":selected_class,"term":term,"subject":technical_subject,"marks":technical_mark})
+            marks = pd.concat([marks,pd.DataFrame(new_entries)], ignore_index=True)
+            save(marks, MARKS_FILE)
+            st.success(f"Marks saved for {selected_student} for {term}")
+
     # Class Marks and AI Predictions
     st.subheader("📊 Student Marks & AI Predictions")
-    table_data = []
+    table_data=[]
     for student in class_students["student_name"].values:
         student_marks = marks[marks["student"]==student]
         latest_term_marks = student_marks[student_marks["term"]==TERMS[-1]]
         mean_mark = latest_term_marks["marks"].mean() if not latest_term_marks.empty else 0
 
-        # Prediction
-        student_prediction = []
+        student_prediction=[]
         subjects = student_marks["subject"].unique()
         for subj in subjects:
             subj_data = student_marks[student_marks["subject"]==subj].copy()
             subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
             subj_data = subj_data.sort_values("term_order")
-            if len(subj_data) < 2:
-                pred = subj_data["marks"].iloc[-1] if not subj_data.empty else 0
+            if len(subj_data)<2:
+                pred=subj_data["marks"].iloc[-1] if not subj_data.empty else 0
             else:
-                X = np.arange(len(subj_data)).reshape(-1,1)
-                y = subj_data["marks"].values
-                model = LinearRegression()
+                X=np.arange(len(subj_data)).reshape(-1,1)
+                y=subj_data["marks"].values
+                model=LinearRegression()
                 model.fit(X,y)
-                pred = model.predict([[len(subj_data)]])[0]
-            pred = max(0,min(100,pred))
+                pred=model.predict([[len(subj_data)]])[0]
+            pred=max(0,min(100,pred))
             student_prediction.append(pred)
-
         expected_mean = np.mean(student_prediction) if student_prediction else mean_mark
-        table_data.append({
-            "Student": student,
-            "Latest Mean": round(mean_mark,2),
-            "Expected Mean": round(expected_mean,2),
-            "Expected Grade": grade(expected_mean)
-        })
+        table_data.append({"Student":student,"Latest Mean":round(mean_mark,2),"Expected Mean":round(expected_mean,2),"Expected Grade":grade(expected_mean)})
 
-    class_df = pd.DataFrame(table_data)
+    class_df=pd.DataFrame(table_data)
     st.dataframe(class_df)
 
-    # Bar Chart for Class Predictions
+    # Bar Chart
     st.subheader("📊 Class Expected Mean Marks")
     fig, ax = plt.subplots(figsize=(10,5))
     ax.bar(class_df["Student"], class_df["Expected Mean"], color='green')
@@ -268,7 +323,7 @@ elif role in ["teacher", "admin"]:
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
-    # Prediction Summary at Bottom
+    # Summary
     st.subheader("🔮 Summary Predictions")
     overall_expected_mean = class_df["Expected Mean"].mean() if not class_df.empty else 0
     st.metric("Class Expected Mean Mark", round(overall_expected_mean,2))
