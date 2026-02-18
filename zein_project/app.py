@@ -5,11 +5,11 @@ import hashlib
 import numpy as np
 import matplotlib.pyplot as plt
 
+# =========================
+# CONFIG & FILE PATHS
+# =========================
 st.set_page_config(page_title="Zein School ERP AI", layout="wide")
 
-# =========================
-# FILES & CONFIG
-# =========================
 USERS_FILE = "users.csv"
 STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
@@ -25,17 +25,26 @@ SCIENCE_REL = ["CRE", "Physics"]
 TECHNICAL = ["Business", "Computer", "Agriculture"]
 
 # =========================
-# UTILITIES
+# UTILITIES & REPAIR
 # =========================
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
 
-def ensure_csv(file, cols, default=None):
+def load_data(file, expected_cols, default_rows=None):
+    """Loads CSV and ensures headers are correct to prevent KeyErrors."""
     if not os.path.exists(file):
-        pd.DataFrame(default or [], columns=cols).to_csv(file, index=False)
-
-def load(file):
-    return pd.read_csv(file)
+        df = pd.DataFrame(default_rows or [], columns=expected_cols)
+        df.to_csv(file, index=False)
+        return df
+    
+    df = pd.read_csv(file)
+    # Check if any expected column is missing
+    missing = [c for c in expected_cols if c not in df.columns]
+    if missing:
+        for c in missing:
+            df[c] = "" if "marks" not in c and "attendance" not in c else 0
+        df.to_csv(file, index=False)
+    return df
 
 def save(df, file):
     df.to_csv(file, index=False)
@@ -50,193 +59,189 @@ def grade(avg):
 def zein_predict(scores, terms):
     if len(scores) < 2:
         return scores[-1] if scores else 0
-    x = np.array(terms)
-    y = np.array(scores)
-    coef = np.polyfit(x, y, 1)
-    next_term = max(terms) + 1
-    pred = coef[0] * next_term + coef[1]
-    return max(0, min(100, pred))
+    try:
+        coef = np.polyfit(terms, scores, 1)
+        next_term = max(terms) + 1
+        pred = coef[0] * next_term + coef[1]
+        return max(0, min(100, pred))
+    except:
+        return scores[-1]
 
 # =========================
-# INITIALIZE DATABASE
+# INITIALIZE DATA
 # =========================
-ensure_csv(USERS_FILE, ["username","password","role"], [["admin", hash_password("1234"), "admin"]])
-ensure_csv(STUDENTS_FILE, ["student","class"])
-ensure_csv(MARKS_FILE, ["student","class","term","subject","marks"])
-ensure_csv(ATTENDANCE_FILE, ["student","class","term","attendance"])
-
-users = load(USERS_FILE)
-students = load(STUDENTS_FILE)
-marks = load(MARKS_FILE)
-attendance = load(ATTENDANCE_FILE)
+users = load_data(USERS_FILE, ["username", "password", "role"], [["admin", hash_password("1234"), "admin"]])
+students = load_data(STUDENTS_FILE, ["student", "class"])
+marks = load_data(MARKS_FILE, ["student", "class", "term", "subject", "marks"])
+attendance = load_data(ATTENDANCE_FILE, ["student", "class", "term", "attendance"])
 
 # =========================
-# LOGIN SYSTEM
+# LOGIN
 # =========================
 if "user" not in st.session_state:
     st.title("🎓 Zein School ERP Login")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
     if st.button("Login"):
-        m = users[(users.username == u) & (users.password == hash_password(p))]
-        if not m.empty:
-            st.session_state.user = m.iloc[0].to_dict()
+        match = users[(users.username == u) & (users.password == hash_password(p))]
+        if not match.empty:
+            st.session_state.user = match.iloc[0].to_dict()
             st.rerun()
         else:
-            st.error("Invalid login credentials")
+            st.error("Invalid credentials")
     st.stop()
 
 user = st.session_state.user
 role = user["role"]
 
+st.sidebar.title("Zein ERP")
 st.sidebar.write(f"👤 **{user['username']}**")
-st.sidebar.write(f"Role: {role.capitalize()}")
+st.sidebar.info(f"Role: {role.upper()}")
 if st.sidebar.button("Logout"):
     st.session_state.clear()
     st.rerun()
 
 # =========================
-# ADMIN DASHBOARD
+# ADMIN: USER MGMT
 # =========================
 if role == "admin":
-    st.header("🛠 Admin Control Panel")
-    t1, t2 = st.tabs(["Manage Users", "System View"])
+    st.header("🛠 Admin Dashboard")
+    t1, t2 = st.tabs(["Add Accounts", "System Clean-up"])
 
     with t1:
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("➕ Add Student")
-            s_name = st.text_input("Student Name")
+            st.subheader("Add Student")
+            s_name = st.text_input("Full Name")
             s_cls = st.selectbox("Assign Class", CLASSES)
-            if st.button("Register Student"):
+            if st.button("Create Student"):
                 if s_name and s_name not in users.username.values:
                     users.loc[len(users)] = [s_name, hash_password("1234"), "student"]
                     students.loc[len(students)] = [s_name, s_cls]
                     save(users, USERS_FILE); save(students, STUDENTS_FILE)
-                    st.success(f"Student {s_name} added.")
+                    st.success("Student added (Pass: 1234)")
+                else: st.error("Name exists or empty")
 
         with col2:
-            st.subheader("➕ Add Staff")
+            st.subheader("Add Teacher")
             t_name = st.text_input("Teacher Username")
-            if st.button("Register Teacher"):
+            if st.button("Create Teacher"):
                 if t_name and t_name not in users.username.values:
                     users.loc[len(users)] = [t_name, hash_password("1234"), "teacher"]
                     save(users, USERS_FILE)
-                    st.success(f"Teacher {t_name} added.")
+                    st.success(f"Teacher {t_name} added")
 
-        st.divider()
-        st.subheader("🗑 Delete User")
+    with t2:
         removable = users[users.username != "admin"]["username"].tolist()
         target = st.selectbox("Select User to Remove", removable)
-        if st.button("Confirm Deletion", font_variant="small-caps"):
+        if st.button("🔥 Permanently Delete User"):
             users = users[users.username != target]
             students = students[students.student != target]
             marks = marks[marks.student != target]
             attendance = attendance[attendance.student != target]
-            save(users, USERS_FILE); save(students, STUDENTS_FILE); save(marks, MARKS_FILE); save(attendance, ATTENDANCE_FILE)
+            save(users, USERS_FILE); save(students, STUDENTS_FILE)
+            save(marks, MARKS_FILE); save(attendance, ATTENDANCE_FILE)
             st.rerun()
 
 # =========================
-# TEACHER DASHBOARD (Generalized)
+# TEACHER: MARKS ENTRY
 # =========================
 elif role == "teacher":
-    st.header("👩‍🏫 Academic Management")
+    st.header("👩‍🏫 Academic Records Management")
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        sel_cls = st.selectbox("Select Class", CLASSES)
-    with col_b:
-        sel_term = st.selectbox("Select Term", TERMS)
+    col_x, col_y = st.columns(2)
+    sel_cls = col_x.selectbox("Target Class", CLASSES)
+    sel_term = col_y.selectbox("Target Term", TERMS)
 
-    class_list = students[students["class"] == sel_cls]["student"].tolist()
+    class_students = students[students["class"] == sel_cls]["student"].tolist()
     
-    if not class_list:
-        st.warning(f"No students registered in {sel_cls}")
+    if not class_students:
+        st.warning(f"No students found in {sel_cls}. Add them in Admin panel.")
     else:
-        tab_marks, tab_att = st.tabs(["Enter Marks", "Enter Attendance"])
+        tab_m, tab_a = st.tabs(["Subject Grading", "Attendance Records"])
 
-        with tab_marks:
-            st.info("Select elective subjects for this class to update records.")
+        with tab_m:
+            st.caption("Choose the elective subjects for this class:")
             c1, c2, c3 = st.columns(3)
             h_sub = c1.selectbox("Humanity", HUMANITIES)
-            s_sub = c2.selectbox("Science Elective", SCIENCE_REL)
+            s_sub = c2.selectbox("Science", SCIENCE_REL)
             t_sub = c3.selectbox("Technical", TECHNICAL)
             
-            active_subjects = COMPULSORY + [h_sub, s_sub, t_sub]
+            all_subs = COMPULSORY + [h_sub, s_sub, t_sub]
             
-            for subj in active_subjects:
-                with st.expander(f"Edit Marks: {subj}", expanded=False):
-                    # Fetch existing marks or default to 0
-                    current_marks = []
-                    for s in class_list:
-                        match = marks[(marks.student == s) & (marks.term == sel_term) & (marks.subject == subj)]
-                        current_marks.append(match["marks"].values[0] if not match.empty else 0)
+            for subj in all_subs:
+                with st.expander(f"📝 {subj} Marks", expanded=False):
+                    # Fetch existing marks for these students
+                    m_data = []
+                    for s in class_students:
+                        row = marks[(marks.student == s) & (marks.term == sel_term) & (marks.subject == subj)]
+                        m_data.append(row["marks"].values[0] if not row.empty else 0)
                     
-                    df_edit = pd.DataFrame({"Student": class_list, "Marks": current_marks})
-                    edited_df = st.data_editor(df_edit, key=f"editor_{subj}_{sel_cls}", use_container_width=True)
+                    edit_df = pd.DataFrame({"Student": class_students, "Marks": m_data})
+                    result_df = st.data_editor(edit_df, key=f"ed_{subj}_{sel_cls}", use_container_width=True)
                     
-                    if st.button(f"Update {subj} Marks", key=f"btn_{subj}"):
-                        # Remove old entries for this specific class/term/subject
-                        marks = marks[~((marks.term == sel_term) & (marks.subject == subj) & (marks.student.isin(class_list)))]
-                        # Add new entries
-                        for _, row in edited_df.iterrows():
-                            marks.loc[len(marks)] = [row.Student, sel_cls, sel_term, subj, row.Marks]
+                    if st.button(f"Save {subj}", key=f"sav_{subj}"):
+                        # Clear old entries for this specific set
+                        marks = marks[~((marks.term == sel_term) & (marks.subject == subj) & (marks.student.isin(class_students)))]
+                        # Add new
+                        for _, r in result_df.iterrows():
+                            marks.loc[len(marks)] = [r.Student, sel_cls, sel_term, subj, r.Marks]
                         save(marks, MARKS_FILE)
-                        st.success(f"Records updated for {subj}")
+                        st.toast(f"Saved {subj}!")
 
-        with tab_att:
-            st.subheader("Attendance Percentage")
-            current_att = []
-            for s in class_list:
-                match = attendance[(attendance.student == s) & (attendance.term == sel_term)]
-                current_att.append(match["attendance"].values[0] if not match.empty else 0)
+        with tab_a:
+            st.subheader("Attendance (%)")
+            att_data = []
+            for s in class_students:
+                row = attendance[(attendance.student == s) & (attendance.term == sel_term)]
+                att_data.append(row["attendance"].values[0] if not row.empty else 0)
             
-            df_att = pd.DataFrame({"Student": class_list, "Attendance %": current_att})
-            edited_att = st.data_editor(df_att, use_container_width=True)
+            att_edit_df = pd.DataFrame({"Student": class_students, "Attendance": att_data})
+            final_att = st.data_editor(att_edit_df, use_container_width=True)
             
             if st.button("Save Attendance"):
-                attendance = attendance[~((attendance.term == sel_term) & (attendance.student.isin(class_list)))]
-                for _, row in edited_att.iterrows():
-                    attendance.loc[len(attendance)] = [row.Student, sel_cls, sel_term, row["Attendance %"]]
+                attendance = attendance[~((attendance.term == sel_term) & (attendance.student.isin(class_students)))]
+                for _, r in final_att.iterrows():
+                    attendance.loc[len(attendance)] = [r.Student, sel_cls, sel_term, r.Attendance]
                 save(attendance, ATTENDANCE_FILE)
-                st.success("Attendance saved.")
+                st.success("Attendance Updated")
 
 # =========================
-# STUDENT DASHBOARD
+# STUDENT: AI INSIGHTS
 # =========================
 elif role == "student":
-    st.header(f"📊 Report Card: {user['username']}")
+    st.header(f"📊 Progress Report: {user['username']}")
     
-    s_marks = marks[marks.student == user["username"]]
-    s_att = attendance[attendance.student == user["username"]]
+    my_marks = marks[marks.student == user["username"]]
+    my_att = attendance[attendance.student == user["username"]]
 
-    if s_marks.empty:
-        st.info("No academic records found yet.")
+    if my_marks.empty:
+        st.info("No marks recorded yet. Check back after your teacher updates them.")
     else:
-        # Performance Analytics
-        avg_per_term = s_marks.groupby("term")["marks"].mean().reindex(TERMS).fillna(0)
-        
-        col1, col2, col3 = st.columns(3)
-        overall_avg = s_marks.marks.mean()
-        col1.metric("Mean Score", f"{round(overall_avg, 2)}%")
-        col2.metric("Mean Grade", grade(overall_avg))
-        if not s_att.empty:
-            col3.metric("Avg Attendance", f"{round(s_att.attendance.mean(), 1)}%")
+        # Metrics
+        m_avg = my_marks.marks.mean()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Overall Average", f"{round(m_avg,1)}%")
+        c2.metric("Current Grade", grade(m_avg))
+        if not my_att.empty:
+            c3.metric("Last Attendance", f"{my_att.iloc[-1]['attendance']}%")
 
-        st.subheader("Performance Trend")
-        st.line_chart(avg_per_term)
+        # Trend Chart
+        st.subheader("Performance over Terms")
+        trend = my_marks.groupby("term")["marks"].mean().reindex(TERMS).dropna()
+        st.line_chart(trend)
 
-        # Zein AI Prediction
-        st.subheader("🤖 Zein AI: Predicted Next Term Results")
-        predictions = []
-        for subj in s_marks.subject.unique():
-            subj_df = s_marks[s_marks.subject == subj].copy()
-            subj_df["t_val"] = subj_df.term.map(TERM_INDEX)
-            p_score = zein_predict(subj_df.marks.tolist(), subj_df.t_val.tolist())
-            predictions.append({"Subject": subj, "Predicted Score": round(p_score, 1)})
+        # Zein AI
+        st.divider()
+        st.subheader("🤖 Zein AI - Term Prediction")
         
-        pred_df = pd.DataFrame(predictions)
-        st.table(pred_df)
+        preds = []
+        for s in my_marks.subject.unique():
+            df_s = my_marks[my_marks.subject == s].copy()
+            df_s["t_id"] = df_s.term.map(TERM_INDEX)
+            val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
+            preds.append({"Subject": s, "Predicted Mark": round(val, 1)})
         
-        p_mean = pred_df["Predicted Score"].mean()
-        st.write(f"**Predicted Next Term Grade:** {grade(p_mean)} ({round(p_mean, 2)})")
+        st.table(pd.DataFrame(preds))
+        p_avg = sum(p["Predicted Mark"] for p in preds) / len(preds)
+        st.write(f"**Zein AI Prediction:** You are on track for a **{grade(p_avg)}** next term.")
