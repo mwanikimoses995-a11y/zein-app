@@ -3,9 +3,10 @@ import pandas as pd
 import os
 import hashlib
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="Advanced School ERP", layout="wide")
+st.set_page_config(page_title="Advanced School ERP AI", layout="wide")
 
 # ==========================
 # FILES
@@ -21,16 +22,15 @@ TERM_ORDER = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
 CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
 
 # ==========================
-# SUBJECTS (UPDATED)
+# SUBJECTS
 # ==========================
 COMPULSORY = ["English", "Mathematics", "Kiswahili", "Chemistry", "Biology"]
-
-GROUP_1 = ["Physics", "CRE", "IRE", "HRE"]  # Sciences & Religious
-GROUP_2 = ["History", "Geography"]          # Humanities
+GROUP_1 = ["Physics", "CRE", "IRE", "HRE"]
+GROUP_2 = ["History", "Geography"]
 GROUP_3 = ["Business", "Agriculture", "Computer",
-           "French", "German", "Arabic"]    # Languages
+           "French", "German", "Arabic"]
 GROUP_4 = ["Wood Technology", "Metal Work",
-           "Building Construction", "Electricity"]  # Technical
+           "Building Construction", "Electricity"]
 
 ALL_SUBJECTS = COMPULSORY + GROUP_1 + GROUP_2 + GROUP_3 + GROUP_4
 
@@ -47,10 +47,10 @@ def create_file(file, columns, default=None):
 def save(df, file):
     df.to_csv(file, index=False)
 
-def safe_columns(df, required_cols):
-    for col in required_cols:
-        if col not in df.columns:
-            df[col] = None
+def safe_columns(df, cols):
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
     return df
 
 def load():
@@ -76,11 +76,10 @@ def grade(avg):
     else: return "E"
 
 # ==========================
-# INITIAL FILES
+# CREATE FILES
 # ==========================
 create_file(USERS_FILE, ["username","password","role","subject"],
             [["admin", hash_password("1234"), "admin", ""]])
-
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
 create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
@@ -90,7 +89,7 @@ create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","tot
 # LOGIN
 # ==========================
 if "user" not in st.session_state:
-    st.title("🎓 Advanced School ERP Login")
+    st.title("🎓Zein School Login")
 
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
@@ -100,10 +99,9 @@ if "user" not in st.session_state:
         match = users[(users["username"]==u) & (users["password"]==hash_password(p))]
         if not match.empty:
             st.session_state.user = match.iloc[0].to_dict()
-            st.success("Login successful")
             st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid login")
     st.stop()
 
 users, students, marks, results, attendance = load()
@@ -116,189 +114,36 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # ==========================
-# ADMIN
+# STUDENT DASHBOARD (AI ENABLED)
 # ==========================
-if role == "admin":
-    st.header("Admin Dashboard")
-
-    name = st.text_input("Student Name").strip()
-    class_level = st.selectbox("Class", CLASSES)
-
-    if st.button("Add Student"):
-        if name and name not in students["student_name"].values:
-            students = pd.concat([students, pd.DataFrame([{
-                "student_name": name,
-                "class_level": class_level
-            }])], ignore_index=True)
-            save(students, STUDENTS_FILE)
-
-            users = pd.concat([users, pd.DataFrame([{
-                "username": name,
-                "password": hash_password("1234"),
-                "role": "student",
-                "subject": ""
-            }])], ignore_index=True)
-            save(users, USERS_FILE)
-
-            st.success("Student added")
-            st.rerun()
-        else:
-            st.error("Student exists or invalid")
-
-# ==========================
-# TEACHER
-# ==========================
-elif role == "teacher":
-    st.header("Teacher Dashboard")
-
-    selected_class = st.selectbox("Class", CLASSES)
-    selected_term = st.selectbox("Term", TERMS)
-
-    class_students = students[students["class_level"]==selected_class]
-
-    if class_students.empty:
-        st.warning("No students found")
-        st.stop()
-
-    selected_student = st.selectbox("Student", class_students["student_name"])
-
-    # -------- MARKS ----------
-    st.subheader("Enter Marks")
-
-    student_data = []
-
-    for subject in COMPULSORY:
-        m = st.number_input(subject, 0, 100,
-                            key=f"{subject}_{selected_student}_{selected_term}")
-        student_data.append((subject, m))
-
-    for group, subjects in {
-        "Group 1": GROUP_1,
-        "Group 2": GROUP_2,
-        "Group 3": GROUP_3,
-        "Group 4": GROUP_4
-    }.items():
-        st.write(f"**{group} (Select One)**")
-        s = st.radio(group, subjects,
-                     key=f"{group}_{selected_student}_{selected_term}")
-        m = st.number_input(f"{s}", 0, 100,
-                            key=f"{s}_{selected_student}_{selected_term}")
-        student_data.append((s, m))
-
-    if st.button("Save Marks"):
-        marks = marks[~(
-            (marks["student"]==selected_student) &
-            (marks["term"]==selected_term) &
-            (marks["class_level"]==selected_class)
-        )]
-
-        df = pd.DataFrame(student_data, columns=["subject","marks"])
-        df.insert(0,"term",selected_term)
-        df.insert(0,"class_level",selected_class)
-        df.insert(0,"student",selected_student)
-
-        marks = pd.concat([marks,df], ignore_index=True)
-        save(marks, MARKS_FILE)
-
-        total = df["marks"].sum()
-        avg = df["marks"].mean()
-
-        results = results[~(
-            (results["student"]==selected_student) &
-            (results["term"]==selected_term) &
-            (results["class_level"]==selected_class)
-        )]
-
-        results = pd.concat([results, pd.DataFrame([{
-            "student": selected_student,
-            "class_level": selected_class,
-            "term": selected_term,
-            "total": total,
-            "average": round(avg,2),
-            "grade": grade(avg),
-            "rank": 0
-        }])], ignore_index=True)
-
-        term_results = results[
-            (results["class_level"]==selected_class) &
-            (results["term"]==selected_term)
-        ].sort_values("average", ascending=False).reset_index(drop=True)
-
-        term_results["rank"] = range(1,len(term_results)+1)
-
-        results = results[~(
-            (results["class_level"]==selected_class) &
-            (results["term"]==selected_term)
-        )]
-
-        results = pd.concat([results, term_results], ignore_index=True)
-        save(results, RESULTS_FILE)
-
-        st.success("Marks saved & ranking updated")
-        st.rerun()
-
-    # -------- ATTENDANCE ----------
-    st.subheader("Class Attendance")
-
-    total_days = st.number_input("Total Days in Term", 1, 365, 90)
-    attendance_data = []
-
-    for student in class_students["student_name"]:
-        present = st.number_input(
-            f"{student} Days Present",
-            0, total_days,
-            key=f"att_{student}_{selected_term}"
-        )
-        percent = round((present/total_days)*100,2)
-        attendance_data.append({
-            "student": student,
-            "class_level": selected_class,
-            "term": selected_term,
-            "days_present": present,
-            "total_days": total_days,
-            "attendance_percent": percent
-        })
-
-    if st.button("Save Attendance"):
-        attendance = attendance[
-            ~((attendance["class_level"]==selected_class) &
-              (attendance["term"]==selected_term))
-        ]
-
-        attendance = pd.concat([attendance,
-                                pd.DataFrame(attendance_data)],
-                               ignore_index=True)
-
-        save(attendance, ATTENDANCE_FILE)
-        st.success("Attendance saved")
-        st.rerun()
-
-# ==========================
-# STUDENT
-# ==========================
-elif role == "student":
-    st.header("Student Dashboard")
+if role == "student":
+    st.header("📊 Student AI Dashboard")
 
     student_name = user["username"]
+
     student_results = results[results["student"]==student_name]
+    student_marks = marks[marks["student"]==student_name]
 
     if student_results.empty:
         st.warning("No results yet")
         st.stop()
 
-    selected_term = st.selectbox("Term", student_results["term"].unique())
-    term_data = student_results[student_results["term"]==selected_term].iloc[0]
+    # ================= Trend Graph =================
+    st.subheader("📈 Performance Trend")
 
-    st.metric("Average", term_data["average"])
-    st.metric("Grade", term_data["grade"])
-    st.metric("Rank", int(term_data["rank"]))
+    history = student_results.copy()
+    history["term_order"] = history["term"].map(TERM_ORDER)
+    history = history.sort_values("term_order")
 
-    # AI Prediction
-    if len(student_results) >= 2:
-        history = student_results.copy()
-        history["term_order"] = history["term"].map(TERM_ORDER)
-        history = history.sort_values("term_order")
+    fig, ax = plt.subplots()
+    ax.plot(history["term"], history["average"], marker='o')
+    ax.set_ylabel("Average Score")
+    ax.set_xlabel("Term")
+    ax.set_title("Performance Over Time")
+    st.pyplot(fig)
 
+    # ================= Prediction =================
+    if len(history) >= 2:
         X = np.arange(len(history)).reshape(-1,1)
         y = history["average"].values
 
@@ -308,6 +153,44 @@ elif role == "student":
         prediction = model.predict([[len(history)]])[0]
         prediction = max(0,min(100,prediction))
 
-        st.subheader("AI Prediction")
-        st.info(f"Predicted Average: {round(prediction,2)}")
-        st.info(f"Predicted Grade: {grade(prediction)}")
+        st.subheader("🔮 Next Term Prediction")
+        col1, col2 = st.columns(2)
+        col1.metric("Predicted Average", round(prediction,2))
+        col2.metric("Predicted Grade", grade(prediction))
+
+    # ================= Weak Subject Detection =================
+    st.subheader("📉 Weak Subject Analysis")
+
+    latest_term = history.iloc[-1]["term"]
+    latest_marks = student_marks[student_marks["term"]==latest_term]
+
+    if not latest_marks.empty:
+        weakest = latest_marks.sort_values("marks").iloc[0]
+        strongest = latest_marks.sort_values("marks", ascending=False).iloc[0]
+
+        st.error(f"Weakest Subject: {weakest['subject']} ({weakest['marks']}%)")
+        st.success(f"Strongest Subject: {strongest['subject']} ({strongest['marks']}%)")
+
+        # ================= AI Advice =================
+        st.subheader("🤖 Zein AI Academic Advice")
+
+        advice = ""
+
+        if weakest["marks"] < 50:
+            advice += f"Focus seriously on {weakest['subject']}. Consider extra practice and revision daily. "
+        elif weakest["marks"] < 60:
+            advice += f"Improve {weakest['subject']} by reviewing weak topics weekly. "
+
+        if prediction >= 75:
+            advice += "You are on a strong upward trend. Maintain consistency."
+        elif prediction < 60:
+            advice += "Overall performance is at risk. Increase study time and seek help from teachers."
+
+        st.info(advice)
+
+    # ================= Attendance =================
+    st.subheader("📋 Attendance")
+    student_att = attendance[attendance["student"]==student_name]
+    if not student_att.empty:
+        st.dataframe(student_att[["term","attendance_percent"]])
+
