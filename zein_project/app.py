@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import hashlib
 import numpy as np
-import matplotlib.pyplot as plt
 
 # =========================
 # CONFIG & FILE PATHS
@@ -16,6 +15,7 @@ MARKS_FILE = "marks.csv"
 ATTENDANCE_FILE = "attendance.csv"
 
 TERMS = ["Term 1", "Term 2", "Term 3"]
+TERM_ORDER = {term: i for i, term in enumerate(TERMS)}
 TERM_INDEX = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
 CLASSES = ["Form 1", "Form 2", "Form 3", "Form 4"]
 
@@ -119,38 +119,37 @@ if role == "admin":
                     save(users, USERS_FILE)
                     st.success(f"Added {t_name}")
     with t2:
-        target = st.selectbox("Select User to Remove", users[users.username != "admin"]["username"].tolist())
-        if st.button("🔥 Delete User"):
-            users = users[users.username != target]
-            students = students[students.student != target]
-            marks = marks[marks.student != target]
-            attendance = attendance[attendance.student != target]
-            save(users, USERS_FILE); save(students, STUDENTS_FILE); save(marks, MARKS_FILE); save(attendance, ATTENDANCE_FILE)
-            st.rerun()
+        target_list = users[users.username != "admin"]["username"].tolist()
+        if target_list:
+            target = st.selectbox("Select User to Remove", target_list)
+            if st.button("🔥 Delete User"):
+                users = users[users.username != target]
+                students = students[students.student != target]
+                marks = marks[marks.student != target]
+                attendance = attendance[attendance.student != target]
+                save(users, USERS_FILE); save(students, STUDENTS_FILE); save(marks, MARKS_FILE); save(attendance, ATTENDANCE_FILE)
+                st.rerun()
+        else:
+            st.info("No users to remove.")
 
 # =========================
-# TEACHER (Updated with Student Selector)
+# TEACHER
 # =========================
 elif role == "teacher":
     st.header("👩‍🏫 Academic Management")
-    
     col1, col2, col3 = st.columns(3)
     sel_cls = col1.selectbox("Select Class", CLASSES)
     sel_term = col2.selectbox("Select Term", TERMS)
     
-    # Filter students by the selected class
     class_students = students[students["class"] == sel_cls]["student"].tolist()
     
     if not class_students:
         st.warning(f"No students found in {sel_cls}.")
     else:
-        # NEW: Student Selector for targeted management
         sel_student = col3.selectbox("Target Student", ["-- All Students --"] + class_students)
-        
         tab_m, tab_a = st.tabs(["Subject Grading", "Attendance"])
 
         with tab_m:
-            # Elective Selection
             c_h, c_s, c_t = st.columns(3)
             h_sub = c_h.selectbox("Humanity", HUMANITIES)
             s_sub = c_s.selectbox("Science", SCIENCE_REL)
@@ -158,7 +157,6 @@ elif role == "teacher":
             all_subs = COMPULSORY + [h_sub, s_sub, t_sub]
 
             if sel_student == "-- All Students --":
-                # Bulk View
                 for subj in all_subs:
                     with st.expander(f"Bulk Edit: {subj}"):
                         m_list = [marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)]["marks"].values[0] 
@@ -171,7 +169,6 @@ elif role == "teacher":
                                 marks.loc[len(marks)] = [r.Student, sel_cls, sel_term, subj, r.Marks]
                             save(marks, MARKS_FILE); st.toast(f"{subj} Updated")
             else:
-                # Individual Student View
                 st.subheader(f"Grading: {sel_student}")
                 indiv_data = []
                 for subj in all_subs:
@@ -180,9 +177,7 @@ elif role == "teacher":
                 
                 df_indiv = pd.DataFrame(indiv_data)
                 res_indiv = st.data_editor(df_indiv, use_container_width=True, key="indiv_editor")
-                
                 if st.button(f"Save Marks for {sel_student}"):
-                    # Remove all marks for this student/term across ALL subjects being edited
                     marks = marks[~((marks.student==sel_student)&(marks.term==sel_term)&(marks.subject.isin(all_subs)))]
                     for _, r in res_indiv.iterrows():
                         marks.loc[len(marks)] = [sel_student, sel_cls, sel_term, r.Subject, r.Marks]
@@ -211,19 +206,65 @@ elif role == "teacher":
 # STUDENT DASHBOARD
 # =========================
 elif role == "student":
-    st.header(f"📊 My Report Card")
-    m = marks[marks.student == user["username"]]
-    if m.empty: st.info("No marks found.")
+    st.header(f"📊 Performance Report: {user['username']}")
+    m = marks[marks.student == user["username"]].copy()
+    att_df = attendance[attendance.student == user["username"]].copy()
+    
+    if m.empty:
+        st.info("No marks data available yet.")
     else:
-        avg = m.marks.mean()
-        st.metric("Mean Grade", f"{grade(avg)} ({round(avg,1)}%)")
-        trend = m.groupby("term")["marks"].mean().reindex(TERMS).dropna()
-        if not trend.empty: st.line_chart(trend)
+        # --- EXECUTIVE SUMMARY (METRIC CARDS) ---
+        avg_score = m.marks.mean()
+        avg_att = att_df.attendance.mean() if not att_df.empty else 0
         
-        st.subheader("🤖 Zein AI Prediction")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Current Mean Score", f"{round(avg_score, 1)}%", help="Average across all recorded terms")
+        c2.metric("Projected Grade", grade(avg_score))
+        c3.metric("Avg. Attendance", f"{round(avg_att, 1)}%")
+        
+        st.divider()
+
+        # --- DATA SORTING INTEGRITY ---
+        # Ensure terms follow logical order Term 1 -> 2 -> 3
+        m['term_rank'] = m['term'].map(TERM_ORDER)
+        m = m.sort_values('term_rank')
+
+        col_charts_1, col_charts_2 = st.columns(2)
+
+        with col_charts_1:
+            st.subheader("📈 Academic Trend")
+            # Grouping by term while maintaining chronological order
+            trend_data = m.groupby("term", sort=False)["marks"].mean()
+            st.line_chart(trend_data)
+            st.caption("Average performance across terms")
+
+        with col_charts_2:
+            st.subheader("📊 Subject Strengths & Weaknesses")
+            # Get data for the most recent term available
+            latest_term_name = m.iloc[-1]['term']
+            latest_marks = m[m.term == latest_term_name]
+            
+            # Prepare data for bar chart
+            bar_data = latest_marks.set_index("subject")["marks"]
+            st.bar_chart(bar_data)
+            st.caption(f"Performance breakdown for {latest_term_name}")
+
+        st.divider()
+
+        # --- AI PREDICTIONS ---
+        st.subheader("🤖 Zein AI Future Outlook")
         preds = []
         for s in m.subject.unique():
             df_s = m[m.subject == s].copy()
             df_s["t_id"] = df_s.term.map(TERM_INDEX)
-            preds.append({"Subject": s, "Predicted": round(zein_predict(df_s.marks.tolist(), df_s.t_id.tolist()), 1)})
+            # Use chronological sorting for prediction logic
+            df_s = df_s.sort_values("t_id")
+            
+            pred_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
+            preds.append({
+                "Subject": s, 
+                "Current Avg": f"{round(df_s.marks.mean(), 1)}%", 
+                "AI Prediction (Next Term)": f"{round(pred_val, 1)}%"
+            })
+        
         st.table(pd.DataFrame(preds))
