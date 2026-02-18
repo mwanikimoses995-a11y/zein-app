@@ -117,17 +117,38 @@ if role == "student":
         st.stop()
 
     # Latest Term
-    latest_term = student_marks["term"].map(TERM_ORDER).idxmax()
-    latest_term_name = student_marks.loc[latest_term]["term"]
+    latest_term_idx = student_marks["term"].map(TERM_ORDER).idxmax()
+    latest_term_name = student_marks.loc[latest_term_idx]["term"]
 
     latest_marks = student_marks[student_marks["term"] == latest_term_name]
-
     mean_mark = latest_marks["marks"].mean()
 
     st.metric("Mean Mark", round(mean_mark,2))
     st.metric("Grade", grade(mean_mark))
 
-    # AI Prediction
+    # ==========================
+    # SUBJECT PERFORMANCE GRAPHS
+    # ==========================
+    st.subheader("📈 Subject Performance Over Time")
+
+    for subject in student_marks["subject"].unique():
+        subj_df = student_marks[student_marks["subject"] == subject].copy()
+        subj_df["term_order"] = subj_df["term"].map(TERM_ORDER)
+        subj_df = subj_df.sort_values("term_order")
+
+        fig, ax = plt.subplots()
+        ax.plot(subj_df["term"], subj_df["marks"], marker="o")
+        ax.set_title(subject)
+        ax.set_ylabel("Marks")
+        ax.set_xlabel("Term")
+        ax.set_ylim(0, 100)
+        ax.grid(True)
+
+        st.pyplot(fig)
+
+    # ==========================
+    # AI PREDICTION
+    # ==========================
     st.subheader("🔮 AI Next Term Prediction")
 
     predicted = []
@@ -154,7 +175,9 @@ if role == "student":
     st.metric("Expected Mean Next Term", round(expected_mean,2))
     st.metric("Expected Grade", grade(expected_mean))
 
-    # Attendance
+    # ==========================
+    # ATTENDANCE
+    # ==========================
     st.subheader("📋 Attendance")
 
     if not student_attendance.empty:
@@ -169,7 +192,6 @@ elif role == "admin":
 
     users, students, marks, results, attendance = load_data()
 
-    # ADD USERS
     st.subheader("➕ Add User")
 
     user_type = st.selectbox("User Type", ["Student","Teacher"])
@@ -197,11 +219,9 @@ elif role == "admin":
                 save_data(users, USERS_FILE)
                 st.success("Teacher Added")
 
-    # VIEW USERS
     st.subheader("👥 All Users")
     st.dataframe(users)
 
-    # REMOVE USER
     remove_user = st.selectbox("Remove User", users["username"])
     if st.button("Delete User"):
         users = users[users["username"] != remove_user]
@@ -226,7 +246,6 @@ elif role == "teacher":
     users, students, marks, results, attendance = load_data()
 
     selected_class = st.selectbox("Select Class", CLASSES)
-
     class_students = students[students["class_level"] == selected_class]
 
     if class_students.empty:
@@ -236,13 +255,9 @@ elif role == "teacher":
     selected_student = st.selectbox("Select Student", class_students["student_name"])
     term = st.selectbox("Select Term", TERMS)
 
-    # =====================
-    # ENTER MARKS
-    # =====================
     st.subheader("✏️ Enter Marks")
 
     subject_marks = {}
-
     for subj in COMPULSORY:
         subject_marks[subj] = st.number_input(f"{subj}", 0, 100, 0)
 
@@ -260,7 +275,6 @@ elif role == "teacher":
         )]
 
         new_rows = []
-
         for subj, mark in subject_marks.items():
             new_rows.append([selected_student, selected_class, term, subj, mark])
 
@@ -268,16 +282,11 @@ elif role == "teacher":
         new_rows.append([selected_student, selected_class, term, tech, tech_mark])
 
         new_df = pd.DataFrame(new_rows, columns=marks.columns)
-
         marks = pd.concat([marks, new_df], ignore_index=True)
-
         save_data(marks, MARKS_FILE)
 
         st.success("Marks Saved Successfully")
 
-    # =====================
-    # ATTENDANCE ENTRY
-    # =====================
     st.subheader("📋 Enter Attendance")
 
     days_present = st.number_input("Days Present", 0, 100, 0)
@@ -302,5 +311,4 @@ elif role == "teacher":
         ]
 
         save_data(attendance, ATTENDANCE_FILE)
-
         st.success("Attendance Saved Successfully")
