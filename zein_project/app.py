@@ -63,7 +63,6 @@ def load():
     marks = safe_columns(marks, ["student","class_level","term","subject","marks"])
     results = safe_columns(results, ["student","class_level","term","total","average","grade","rank"])
     attendance = safe_columns(attendance, ["student","class_level","term","days_present","total_days","attendance_percent"])
-
     return users, students, marks, results, attendance
 
 def grade(avg):
@@ -76,18 +75,11 @@ def grade(avg):
 # ==========================
 # CREATE FILES IF NOT EXIST
 # ==========================
-create_file(USERS_FILE, ["username","password","role","subject"])
+create_file(USERS_FILE, ["username","password","role","subject"], [["admin", hash_password("1234"), "admin", ""]])
 create_file(STUDENTS_FILE, ["student_name","class_level"])
 create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
 create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
 create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
-
-# Ensure admin account exists
-users, students, marks, results, attendance = load()
-if "admin" not in users["username"].values:
-    admin_df = pd.DataFrame([{"username":"admin","password":hash_password("1234"),"role":"admin","subject":""}])
-    users = pd.concat([users, admin_df], ignore_index=True)
-    save(users, USERS_FILE)
 
 # ==========================
 # LOGIN
@@ -124,8 +116,8 @@ if role=="admin":
 
     with tab1:
         st.subheader("➕ Add Student")
-        name = st.text_input("Student Name")
-        cls = st.selectbox("Class Level", CLASSES)
+        name = st.text_input("Student Name", key="add_student_name")
+        cls = st.selectbox("Class Level", CLASSES, key="add_student_class")
         if st.button("Add Student"):
             if not name: st.error("Enter name")
             elif name in students["student_name"].values: st.error("Student exists")
@@ -141,8 +133,8 @@ if role=="admin":
 
     with tab2:
         st.subheader("➕ Add Teacher")
-        subject = st.selectbox("Subject", ALL_SUBJECTS)
-        number = st.number_input("Teacher Number",1,20,1)
+        subject = st.selectbox("Subject", ALL_SUBJECTS, key="teacher_subject")
+        number = st.number_input("Teacher Number",1,20,1,key="teacher_number")
         username = f"{subject.lower()}{number}"
         st.info(f"Username: {username}")
         if st.button("Add Teacher"):
@@ -168,9 +160,9 @@ if role=="admin":
 
     with tab4:
         st.subheader("🗑 Remove User")
-        removable_users = users[users["role"]!="admin"]["username"].values
-        if removable_users.size == 0:
-            st.info("No removable users.")
+        removable_users = users[users["username"]!="admin"]["username"].values
+        if len(removable_users)==0:
+            st.info("No removable users")
         else:
             remove_user = st.selectbox("Select User", removable_users)
             if st.button("Remove User"):
@@ -219,8 +211,10 @@ elif role=="teacher":
                 df.insert(0,"student",selected_student)
                 marks_updated = pd.concat([marks_filtered,df],ignore_index=True)
                 save(marks_updated,MARKS_FILE)
+
                 total = df["marks"].sum()
                 avg = df["marks"].mean()
+
                 results_filtered = results_fresh[~((results_fresh["student"]==selected_student)&
                                                    (results_fresh["term"]==selected_term)&
                                                    (results_fresh["class_level"]==selected_class))]
@@ -268,7 +262,7 @@ elif role=="teacher":
                 st.error(str(e))
 
 # ==========================
-# STUDENT DASHBOARD (AI)
+# STUDENT DASHBOARD
 # ==========================
 elif role=="student":
     st.header("📊 Student AI Dashboard")
@@ -276,74 +270,57 @@ elif role=="student":
     student_results = results[results["student"]==student_name]
     student_marks = marks[marks["student"]==student_name]
     student_attendance = attendance[attendance["student"]==student_name]
+    if student_results.empty: st.warning("No results yet"); st.stop()
 
-    if student_results.empty: 
-        st.warning("No results yet")
-        st.stop()
-
-    # ---------- Performance Trend ----------
+    # Performance Trend
     st.subheader("📈 Performance Trend")
     history = student_results.copy()
     history["term_order"] = history["term"].map(TERM_ORDER)
     history = history.sort_values("term_order")
 
     fig, ax = plt.subplots()
-    ax.plot(history["term"], history["average"], marker='o', color='blue', label='Average')
+    ax.bar(history["term"], history["average"], color='skyblue')
     ax.set_ylabel("Average Score")
     ax.set_xlabel("Term")
-    ax.set_ylim(0, 100)
     ax.set_title("Performance Over Time")
-    ax.grid(True)
     st.pyplot(fig)
 
-    # ---------- Prediction ----------
-    pred = None
-    if len(history) >= 2:
+    # Prediction
+    if len(history)>=2:
         X = np.arange(len(history)).reshape(-1,1)
         y = history["average"].values
         model = LinearRegression()
         model.fit(X,y)
         pred = model.predict([[len(history)]])[0]
         pred = max(0,min(100,pred))
+        col1,col2 = st.columns(2)
+        col1.metric("Predicted Average", round(pred,2))
+        col2.metric("Predicted Grade", grade(pred))
+        avg_score = history["average"].mean()
+        st.metric("Average Score So Far", round(avg_score,2))
 
-    # ---------- Latest Term Marks ----------
+    # Weak/Strong Subjects
     latest_term = history.iloc[-1]["term"]
     latest_marks = student_marks[student_marks["term"]==latest_term]
-
     if not latest_marks.empty:
-        st.subheader(f"📊 Marks for {latest_term}")
-        fig2, ax2 = plt.subplots()
-        ax2.bar(latest_marks["subject"], latest_marks["marks"], color='orange')
-        ax2.set_ylim(0, 100)
-        ax2.set_ylabel("Marks")
-        ax2.set_title(f"Subject-wise Marks for {latest_term}")
-        plt.xticks(rotation=45)
-        st.pyplot(fig2)
-
         weakest = latest_marks.sort_values("marks").iloc[0]
         strongest = latest_marks.sort_values("marks",ascending=False).iloc[0]
         st.error(f"Weakest Subject: {weakest['subject']} ({weakest['marks']}%)")
         st.success(f"Strongest Subject: {strongest['subject']} ({strongest['marks']}%)")
 
-        avg_latest = latest_marks["marks"].mean()
-        st.metric("📌 Average Marks (Latest Term)", round(avg_latest,2))
-
-        # AI Advice & Predicted Next Term
+        # AI advice
         advice = ""
         if weakest["marks"]<50:
             advice += f"Focus on {weakest['subject']} daily. "
         elif weakest["marks"]<60:
             advice += f"Review {weakest['subject']} weekly. "
-        if pred is not None:
-            st.metric("🔮 Predicted Next Term Average", round(pred,2))
-            st.metric("🎯 Predicted Next Term Grade", grade(pred))
-            if pred>=75:
-                advice += "Keep up the good work! "
-            elif pred<60:
-                advice += "Increase study and seek help."
+        if pred>=75:
+            advice += "Keep up the good work! "
+        elif pred<60:
+            advice += "Increase study and seek help."
         st.info(f"🤖 AI Advice: {advice}")
 
-    # ---------- Attendance ----------
+    # Attendance
     st.subheader("📋 Attendance")
     if not student_attendance.empty:
         st.dataframe(student_attendance[["term","attendance_percent"]])
