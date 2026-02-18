@@ -350,6 +350,6 @@ elif role in ["teacher","admin"]:
     st.pyplot(fig)
 
     overall_expected_mean = class_df["Expected Mean"].mean() if not class_df.empty else 0
-    st.subheader("🔮 Summary Predictions")
+    st.subheader("zein Predictions")
     st.metric("Class Expected Mean Mark", round(overall_expected_mean,2))
     st.metric("Class Expected Grade", grade(overall_expected_mean))
