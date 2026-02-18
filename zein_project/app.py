@@ -47,7 +47,7 @@ def safe_columns(df, cols):
             df[c] = None
     return df
 
-def load():
+def load_data():
     users = pd.read_csv(USERS_FILE) if os.path.exists(USERS_FILE) else pd.DataFrame()
     students = pd.read_csv(STUDENTS_FILE) if os.path.exists(STUDENTS_FILE) else pd.DataFrame()
     marks = pd.read_csv(MARKS_FILE) if os.path.exists(MARKS_FILE) else pd.DataFrame()
@@ -78,7 +78,7 @@ create_file(MARKS_FILE, ["student","class_level","term","subject","marks"])
 create_file(RESULTS_FILE, ["student","class_level","term","total","average","grade","rank"])
 create_file(ATTENDANCE_FILE, ["student","class_level","term","days_present","total_days","attendance_percent"])
 
-users, students, marks, results, attendance = load()
+users, students, marks, results, attendance = load_data()
 
 # ==========================
 # LOGIN & FORGOT PASSWORD
@@ -129,15 +129,16 @@ if st.sidebar.button("Logout"):
 if role=="student":
     st.header("📊 Student AI Dashboard")
     student_name = user["username"]
-    users, students, marks, results, attendance = load()
+    users, students, marks, results, attendance = load_data()
     student_results = results[results["student"]==student_name]
     student_marks = marks[marks["student"]==student_name]
     student_attendance = attendance[attendance["student"]==student_name]
-    if student_results.empty: st.warning("No results yet"); st.stop()
 
-    # --------------------------
+    if student_results.empty:
+        st.warning("No results yet")
+        st.stop()
+
     # Overall Performance Trend
-    # --------------------------
     st.subheader("📈 Overall Performance Trend")
     history = student_results.copy()
     history["term_order"] = history["term"].map(TERM_ORDER)
@@ -147,9 +148,7 @@ if role=="student":
     ax.set_ylabel("Average Score"); ax.set_xlabel("Term"); ax.set_title("Average Score Over Terms")
     st.pyplot(fig)
 
-    # --------------------------
-    # Subject-wise Latest Marks
-    # --------------------------
+    # Latest Subject-wise Marks
     latest_term = history.iloc[-1]["term"]
     latest_marks = student_marks[student_marks["term"]==latest_term]
     if not latest_marks.empty:
@@ -165,43 +164,35 @@ if role=="student":
         st.metric("Mean Mark", round(mean_mark,2))
         st.metric("Overall Grade", grade(mean_mark))
 
-        weakest = latest_marks.sort_values("marks").iloc[0]
-        strongest = latest_marks.sort_values("marks",ascending=False).iloc[0]
-        st.error(f"Weakest Subject: {weakest['subject']} ({weakest['marks']}%)")
-        st.success(f"Strongest Subject: {strongest['subject']} ({strongest['marks']}%)")
-
-    # --------------------------
-    # AI Prediction per Subject for Next Term
-    # --------------------------
-    st.subheader("🔮 AI Predictions for Next Term")
+    # AI Predictions for Next Term
+    st.subheader("🔮 Zein AI Predictions for Next Term")
     predicted_marks = []
-    if len(history) >= 2:
-        subjects = student_marks["subject"].unique()
-        for subj in subjects:
-            subj_data = student_marks[student_marks["subject"]==subj].copy()
-            subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
-            subj_data = subj_data.sort_values("term_order")
+    subjects = student_marks["subject"].unique()
+    for subj in subjects:
+        subj_data = student_marks[student_marks["subject"]==subj].copy()
+        subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
+        subj_data = subj_data.sort_values("term_order")
+        if len(subj_data) < 2:
+            pred = subj_data["marks"].iloc[-1] if not subj_data.empty else 0
+        else:
             X = np.arange(len(subj_data)).reshape(-1,1)
             y = subj_data["marks"].values
             model = LinearRegression()
             model.fit(X,y)
             pred = model.predict([[len(subj_data)]])[0]
-            pred = max(0,min(100,pred))
-            predicted_marks.append({"subject": subj, "predicted_marks": round(pred,2)})
+        pred = max(0,min(100,pred))
+        predicted_marks.append({"subject": subj, "predicted_marks": round(pred,2)})
 
-        pred_df = pd.DataFrame(predicted_marks)
-        st.dataframe(pred_df)
+    pred_df = pd.DataFrame(predicted_marks)
+    st.dataframe(pred_df)
 
-        expected_mean = pred_df["predicted_marks"].mean()
-        st.metric("Expected Mean Mark", round(expected_mean,2))
-        st.metric("Expected Grade", grade(expected_mean))
+    expected_mean = pred_df["predicted_marks"].mean() if not pred_df.empty else 0
+    st.metric("Expected Mean Mark", round(expected_mean,2))
+    st.metric("Expected Grade", grade(expected_mean))
 
-    # --------------------------
     # Subject Trends Across Terms
-    # --------------------------
     if len(history) > 1:
         st.subheader("📊 Subject Trends Across Terms")
-        subjects = student_marks["subject"].unique()
         fig3, ax3 = plt.subplots(figsize=(12,6))
         for subj in subjects:
             subj_data = student_marks[student_marks["subject"]==subj].copy()
@@ -214,9 +205,71 @@ if role=="student":
         ax3.legend(bbox_to_anchor=(1.05,1),loc='upper left')
         st.pyplot(fig3)
 
-    # --------------------------
     # Attendance
-    # --------------------------
     st.subheader("📋 Attendance")
     if not student_attendance.empty:
         st.dataframe(student_attendance[["term","attendance_percent"]])
+
+# ==========================
+# TEACHER / ADMIN DASHBOARD
+# ==========================
+elif role in ["teacher", "admin"]:
+    st.header(f"👩‍🏫 {role.capitalize()} Dashboard")
+    users, students, marks, results, attendance = load_data()
+    selected_class = st.selectbox("Select Class", CLASSES)
+    class_students = students[students["class_level"]==selected_class]
+    if class_students.empty:
+        st.warning("No students in this class")
+        st.stop()
+
+    # Class Marks and AI Predictions
+    st.subheader("📊 Student Marks & AI Predictions")
+    table_data = []
+    for student in class_students["student_name"].values:
+        student_marks = marks[marks["student"]==student]
+        latest_term_marks = student_marks[student_marks["term"]==TERMS[-1]]
+        mean_mark = latest_term_marks["marks"].mean() if not latest_term_marks.empty else 0
+
+        # Prediction
+        student_prediction = []
+        subjects = student_marks["subject"].unique()
+        for subj in subjects:
+            subj_data = student_marks[student_marks["subject"]==subj].copy()
+            subj_data["term_order"] = subj_data["term"].map(TERM_ORDER)
+            subj_data = subj_data.sort_values("term_order")
+            if len(subj_data) < 2:
+                pred = subj_data["marks"].iloc[-1] if not subj_data.empty else 0
+            else:
+                X = np.arange(len(subj_data)).reshape(-1,1)
+                y = subj_data["marks"].values
+                model = LinearRegression()
+                model.fit(X,y)
+                pred = model.predict([[len(subj_data)]])[0]
+            pred = max(0,min(100,pred))
+            student_prediction.append(pred)
+
+        expected_mean = np.mean(student_prediction) if student_prediction else mean_mark
+        table_data.append({
+            "Student": student,
+            "Latest Mean": round(mean_mark,2),
+            "Expected Mean": round(expected_mean,2),
+            "Expected Grade": grade(expected_mean)
+        })
+
+    class_df = pd.DataFrame(table_data)
+    st.dataframe(class_df)
+
+    # Bar Chart for Class Predictions
+    st.subheader("📊 Class Expected Mean Marks")
+    fig, ax = plt.subplots(figsize=(10,5))
+    ax.bar(class_df["Student"], class_df["Expected Mean"], color='green')
+    ax.set_ylabel("Expected Mean"); ax.set_xlabel("Student"); ax.set_title(f"Class {selected_class} Predictions")
+    ax.set_ylim(0,100)
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+
+    # Prediction Summary at Bottom
+    st.subheader("🔮 Summary Predictions")
+    overall_expected_mean = class_df["Expected Mean"].mean() if not class_df.empty else 0
+    st.metric("Class Expected Mean Mark", round(overall_expected_mean,2))
+    st.metric("Class Expected Grade", grade(overall_expected_mean))
