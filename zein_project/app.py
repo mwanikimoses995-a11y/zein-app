@@ -14,8 +14,7 @@ STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
 ATTENDANCE_FILE = "attendance.csv"
 
-# 8-4-4 / Kenyan School Calendar Constant
-TOTAL_SCHOOL_DAYS = 65 
+MAX_SCHOOL_DAYS = 65 
 
 TERMS = ["Term 1", "Term 2", "Term 3"]
 TERM_ORDER = {term: i for i, term in enumerate(TERMS)}
@@ -28,7 +27,7 @@ SCIENCE_REL = ["CRE", "Physics"]
 TECHNICAL = ["Business", "Computer", "Agriculture"]
 
 # =========================
-# UTILITIES & DATA REPAIR
+# UTILITIES
 # =========================
 def hash_password(p):
     return hashlib.sha256(p.encode()).hexdigest()
@@ -48,7 +47,6 @@ def save(df, file):
     df.to_csv(file, index=False)
 
 def get_kcse_grade(marks):
-    """Standard KCSE Grading System"""
     if marks >= 80: return "A", 12
     if marks >= 75: return "A-", 11
     if marks >= 70: return "B+", 10
@@ -149,7 +147,8 @@ elif role == "teacher":
         st.warning(f"No students found in {sel_cls}.")
     else:
         sel_student = col3.selectbox("Target Student", ["-- All Students --"] + class_students)
-        tab_m, tab_a = st.tabs(["Subject Grading", "Attendance"])
+        tab_m, tab_a = st.tabs(["Subject Grading", "Attendance (Days)"])
+        
         with tab_m:
             c_h, c_s, c_t = st.columns(3)
             h_sub = c_h.selectbox("Humanity", HUMANITIES)
@@ -160,105 +159,4 @@ elif role == "teacher":
             if sel_student == "-- All Students --":
                 for subj in all_subs:
                     with st.expander(f"Bulk Edit: {subj}"):
-                        m_list = [marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)]["marks"].values[0] if not marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)].empty else 0 for s in class_students]
-                        res = st.data_editor(pd.DataFrame({"Student": class_students, "Marks": m_list}), key=f"bulk_{subj}")
-                        if st.button(f"Save {subj}", key=f"btn_{subj}"):
-                            marks = marks[~((marks.term==sel_term)&(marks.subject==subj)&(marks.student.isin(class_students)))]
-                            for _, r in res.iterrows():
-                                marks.loc[len(marks)] = [r.Student, sel_cls, sel_term, subj, r.Marks]
-                            save(marks, MARKS_FILE); st.rerun()
-            else:
-                indiv_data = [{"Subject": s, "Marks": (marks[(marks.student==sel_student)&(marks.term==sel_term)&(marks.subject==s)]["marks"].values[0] if not marks[(marks.student==sel_student)&(marks.term==sel_term)&(marks.subject==s)].empty else 0)} for s in all_subs]
-                res_indiv = st.data_editor(pd.DataFrame(indiv_data), key="indiv_editor")
-                if st.button(f"Save Marks for {sel_student}"):
-                    marks = marks[~((marks.student==sel_student)&(marks.term==sel_term))]
-                    for _, r in res_indiv.iterrows():
-                        marks.loc[len(marks)] = [sel_student, sel_cls, sel_term, r.Subject, r.Marks]
-                    save(marks, MARKS_FILE); st.rerun()
-
-        with tab_a:
-            st.info(f"Target School Days for this Term: {TOTAL_SCHOOL_DAYS}")
-            if sel_student == "-- All Students --":
-                att_list = [attendance[(attendance.student==s)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==s)&(attendance.term==sel_term)].empty else 0 for s in class_students]
-                res_att = st.data_editor(pd.DataFrame({"Student": class_students, "Days Present": att_list}))
-                if st.button("Save All Attendance"):
-                    attendance = attendance[~((attendance.term==sel_term)&(attendance.student.isin(class_students)))]
-                    for _, r in res_att.iterrows():
-                        attendance.loc[len(attendance)] = [r.Student, sel_cls, sel_term, min(r['Days Present'], TOTAL_SCHOOL_DAYS)]
-                    save(attendance, ATTENDANCE_FILE); st.success("Attendance Saved"); st.rerun()
-            else:
-                val_att = attendance[(attendance.student==sel_student)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==sel_student)&(attendance.term==sel_term)].empty else 0
-                new_att = st.number_input(f"Days Present for {sel_student}", 0, TOTAL_SCHOOL_DAYS, int(val_att))
-                if st.button("Save Individual Attendance"):
-                    attendance = attendance[~((attendance.student==sel_student)&(attendance.term==sel_term))]
-                    attendance.loc[len(attendance)] = [sel_student, sel_cls, sel_term, new_att]
-                    save(attendance, ATTENDANCE_FILE); st.success("Attendance Updated"); st.rerun()
-
-# =========================
-# STUDENT DASHBOARD
-# =========================
-elif role == "student":
-    st.header(f"📊 Performance Analysis: {user['username']}")
-    m = marks[marks.student == user["username"]].copy()
-    att_df = attendance[attendance.student == user["username"]].copy()
-    
-    if m.empty:
-        st.info("Awaiting academic data entry...")
-    else:
-        avg_score = m.marks.mean()
-        # Calculate Percentage from Days Present
-        avg_days = att_df.days_present.mean() if not att_df.empty else 0
-        att_percentage = (avg_days / TOTAL_SCHOOL_DAYS) * 100
-        
-        current_grade, points = get_kcse_grade(avg_score)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Mean Score", f"{round(avg_score, 1)}%")
-        c2.metric("Grade", current_grade, f"{points} Points")
-        c3.metric("Avg. Attendance", f"{round(att_percentage, 1)}%")
-        
-        st.divider()
-
-        m['term_rank'] = m['term'].map(TERM_ORDER)
-        m = m.sort_values('term_rank')
-        col_charts_1, col_charts_2 = st.columns(2)
-
-        with col_charts_1:
-            st.subheader("📈 Termly Mean Trend")
-            trend_data = m.groupby("term", sort=False)["marks"].mean()
-            st.bar_chart(trend_data)
-
-        with col_charts_2:
-            st.subheader("🎯 Latest Subject Breakdown")
-            latest_term = m.iloc[-1]['term']
-            latest_marks = m[m.term == latest_term]
-            st.bar_chart(latest_marks.set_index("subject")["marks"])
-
-        st.divider()
-
-        st.subheader("🤖 Zein AI Future Outlook & Intervention")
-        preds = []
-        for s in m.subject.unique():
-            df_s = m[m.subject == s].copy()
-            df_s["t_id"] = df_s.term.map(TERM_INDEX)
-            df_s = df_s.sort_values("t_id")
-            
-            p_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
-            p_grade, _ = get_kcse_grade(p_val)
-            status = "✅ Stable" if p_val >= df_s.marks.mean() else "⚠️ Declining"
-            
-            preds.append({
-                "Subject": s, 
-                "Latest Mark (%)": df_s.marks.iloc[-1],
-                "AI Prediction (%)": round(p_val, 1),
-                "Projected Grade": p_grade,
-                "Status": status
-            })
-        
-        df_preds = pd.DataFrame(preds)
-
-        def style_intervention(row):
-            return ['color: red' if row.Status == "⚠️ Declining" or row['Projected Grade'] in ['D', 'D-', 'E'] else 'color: white'] * len(row)
-
-        st.dataframe(df_preds.style.apply(style_intervention, axis=1), use_container_width=True)
-        st.caption(f"Attendance calculated against {TOTAL_SCHOOL_DAYS} days per term.")
+                        m_list = [marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)]["marks"].values[0] if not marks[(marks.student==s)&(marks.term==
