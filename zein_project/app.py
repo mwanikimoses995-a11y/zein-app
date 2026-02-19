@@ -186,7 +186,7 @@ elif role == "student":
     else:
         avg_score = m.marks.mean()
         avg_att = att_df.attendance.mean() if not att_df.empty else 0
-        current_grade, points = get_grade(avg_score)
+        current_grade, points = get_KCSE_grade(avg_score)
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Mean Score", f"{round(avg_score, 1)}%")
