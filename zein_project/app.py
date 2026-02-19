@@ -177,7 +177,7 @@ elif role == "teacher":
 # STUDENT DASHBOARD (IMPROVED)
 # =========================
 elif role == "student":
-    st.header(f"📊 KCSE Performance Analysis: {user['username']}")
+    st.header(f"📊  Performance Analysis: {user['username']}")
     m = marks[marks.student == user["username"]].copy()
     att_df = attendance[attendance.student == user["username"]].copy()
     
