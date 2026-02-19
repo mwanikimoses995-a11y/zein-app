@@ -52,12 +52,16 @@ def grade(avg):
     return "E"
 
 def zein_predict(scores, terms):
+    """Predicts next grade using linear regression on all available historical points."""
     if len(scores) < 2: return scores[-1] if scores else 0
     try:
+        # Linear regression: fits a line to all past and current term scores
         coef = np.polyfit(terms, scores, 1)
         next_term = max(terms) + 1
-        return max(0, min(100, coef[0] * next_term + coef[1]))
-    except: return scores[-1]
+        prediction = coef[0] * next_term + coef[1]
+        return max(0, min(100, prediction)) # Cap between 0-100%
+    except: 
+        return scores[-1]
 
 # =========================
 # INITIALIZE DATA
@@ -218,53 +222,51 @@ elif role == "student":
         avg_att = att_df.attendance.mean() if not att_df.empty else 0
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Current Mean Score", f"{round(avg_score, 1)}%", help="Average across all recorded terms")
+        c1.metric("Current Mean Score", f"{round(avg_score, 1)}%", help="Average across all recorded data")
         c2.metric("Projected Grade", grade(avg_score))
         c3.metric("Avg. Attendance", f"{round(avg_att, 1)}%")
         
         st.divider()
 
-        # --- DATA SORTING INTEGRITY ---
-        # Ensure terms follow logical order Term 1 -> 2 -> 3
+        # Chronological Sort
         m['term_rank'] = m['term'].map(TERM_ORDER)
         m = m.sort_values('term_rank')
 
         col_charts_1, col_charts_2 = st.columns(2)
 
         with col_charts_1:
-            st.subheader("📈 Academic Trend")
-            # Grouping by term while maintaining chronological order
+            st.subheader("📊 Academic Term Performance")
+            # CHANGED TO BAR CHART AS REQUESTED
             trend_data = m.groupby("term", sort=False)["marks"].mean()
-            st.line_chart(trend_data)
-            st.caption("Average performance across terms")
+            st.bar_chart(trend_data)
+            st.caption("Mean performance per term (Past and Current)")
 
         with col_charts_2:
-            st.subheader("📊 Subject Strengths & Weaknesses")
-            # Get data for the most recent term available
+            st.subheader("🎯 Subject Proficiency")
             latest_term_name = m.iloc[-1]['term']
             latest_marks = m[m.term == latest_term_name]
-            
-            # Prepare data for bar chart
             bar_data = latest_marks.set_index("subject")["marks"]
             st.bar_chart(bar_data)
-            st.caption(f"Performance breakdown for {latest_term_name}")
+            st.caption(f"Latest breakdown: {latest_term_name}")
 
         st.divider()
 
-        # --- AI PREDICTIONS ---
+        # --- AI PREDICTIONS (UTILIZING ALL AVAILABLE HISTORY) ---
         st.subheader("🤖 Zein AI Future Outlook")
+        st.write("The AI analyzes your historical trajectory across all terms to predict your next outcome.")
         preds = []
         for s in m.subject.unique():
             df_s = m[m.subject == s].copy()
             df_s["t_id"] = df_s.term.map(TERM_INDEX)
-            # Use chronological sorting for prediction logic
             df_s = df_s.sort_values("t_id")
             
+            # Predicts using both past (historical) and current data points
             pred_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
+            
             preds.append({
                 "Subject": s, 
-                "Current Avg": f"{round(df_s.marks.mean(), 1)}%", 
-                "AI Prediction (Next Term)": f"{round(pred_val, 1)}%"
+                "Overall Avg (%)": round(df_s.marks.mean(), 1), 
+                "AI Prediction (Next Term %)": round(pred_val, 1)
             })
         
-        st.table(pd.DataFrame(preds))
+        st.dataframe(pd.DataFrame(preds), use_container_width=True)
