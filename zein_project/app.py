@@ -190,7 +190,7 @@ elif role == "student":
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Mean Score", f"{round(avg_score, 1)}%")
-        c2.metric("KCSE Grade", current_grade, f"{points} Points")
+        c2.metric("Grade", current_grade, f"{points} Points")
         c3.metric("Avg. Attendance", f"{round(avg_att, 1)}%")
         
         st.divider()
