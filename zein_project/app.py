@@ -177,7 +177,7 @@ elif role == "teacher":
 # STUDENT DASHBOARD (IMPROVED)
 # =========================
 elif role == "student":
-    st.header(f"📊Performance Analysis: {user['username']}")
+    st.header(f"📊 KCSE Performance Analysis: {user['username']}")
     m = marks[marks.student == user["username"]].copy()
     att_df = attendance[attendance.student == user["username"]].copy()
     
@@ -186,7 +186,7 @@ elif role == "student":
     else:
         avg_score = m.marks.mean()
         avg_att = att_df.attendance.mean() if not att_df.empty else 0
-        current_grade, points = get_KCSE_grade(avg_score)
+        current_grade, points = get_kcse_grade(avg_score)
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Mean Score", f"{round(avg_score, 1)}%")
