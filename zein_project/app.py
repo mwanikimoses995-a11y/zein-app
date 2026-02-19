@@ -14,6 +14,9 @@ STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
 ATTENDANCE_FILE = "attendance.csv"
 
+# 8-4-4 / Kenyan School Calendar Constant
+TOTAL_SCHOOL_DAYS = 65 
+
 TERMS = ["Term 1", "Term 2", "Term 3"]
 TERM_ORDER = {term: i for i, term in enumerate(TERMS)}
 TERM_INDEX = {"Term 1": 1, "Term 2": 2, "Term 3": 3}
@@ -75,7 +78,7 @@ def zein_predict(scores, terms):
 users = load_data(USERS_FILE, ["username", "password", "role"], [["admin", hash_password("1234"), "admin"]])
 students = load_data(STUDENTS_FILE, ["student", "class"])
 marks = load_data(MARKS_FILE, ["student", "class", "term", "subject", "marks"])
-attendance = load_data(ATTENDANCE_FILE, ["student", "class", "term", "attendance"])
+attendance = load_data(ATTENDANCE_FILE, ["student", "class", "term", "days_present"])
 
 # =========================
 # LOGIN
@@ -102,7 +105,7 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # =========================
-# ADMIN / TEACHER SECTIONS (Kept original logic)
+# ADMIN / TEACHER SECTIONS
 # =========================
 if role == "admin":
     st.header("🛠 Admin Dashboard")
@@ -173,11 +176,29 @@ elif role == "teacher":
                         marks.loc[len(marks)] = [sel_student, sel_cls, sel_term, r.Subject, r.Marks]
                     save(marks, MARKS_FILE); st.rerun()
 
+        with tab_a:
+            st.info(f"Target School Days for this Term: {TOTAL_SCHOOL_DAYS}")
+            if sel_student == "-- All Students --":
+                att_list = [attendance[(attendance.student==s)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==s)&(attendance.term==sel_term)].empty else 0 for s in class_students]
+                res_att = st.data_editor(pd.DataFrame({"Student": class_students, "Days Present": att_list}))
+                if st.button("Save All Attendance"):
+                    attendance = attendance[~((attendance.term==sel_term)&(attendance.student.isin(class_students)))]
+                    for _, r in res_att.iterrows():
+                        attendance.loc[len(attendance)] = [r.Student, sel_cls, sel_term, min(r['Days Present'], TOTAL_SCHOOL_DAYS)]
+                    save(attendance, ATTENDANCE_FILE); st.success("Attendance Saved"); st.rerun()
+            else:
+                val_att = attendance[(attendance.student==sel_student)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==sel_student)&(attendance.term==sel_term)].empty else 0
+                new_att = st.number_input(f"Days Present for {sel_student}", 0, TOTAL_SCHOOL_DAYS, int(val_att))
+                if st.button("Save Individual Attendance"):
+                    attendance = attendance[~((attendance.student==sel_student)&(attendance.term==sel_term))]
+                    attendance.loc[len(attendance)] = [sel_student, sel_cls, sel_term, new_att]
+                    save(attendance, ATTENDANCE_FILE); st.success("Attendance Updated"); st.rerun()
+
 # =========================
-# STUDENT DASHBOARD (IMPROVED)
+# STUDENT DASHBOARD
 # =========================
 elif role == "student":
-    st.header(f"📊  Performance Analysis: {user['username']}")
+    st.header(f"📊 Performance Analysis: {user['username']}")
     m = marks[marks.student == user["username"]].copy()
     att_df = attendance[attendance.student == user["username"]].copy()
     
@@ -185,17 +206,19 @@ elif role == "student":
         st.info("Awaiting academic data entry...")
     else:
         avg_score = m.marks.mean()
-        avg_att = att_df.attendance.mean() if not att_df.empty else 0
+        # Calculate Percentage from Days Present
+        avg_days = att_df.days_present.mean() if not att_df.empty else 0
+        att_percentage = (avg_days / TOTAL_SCHOOL_DAYS) * 100
+        
         current_grade, points = get_kcse_grade(avg_score)
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Mean Score", f"{round(avg_score, 1)}%")
         c2.metric("Grade", current_grade, f"{points} Points")
-        c3.metric("Avg. Attendance", f"{round(avg_att, 1)}%")
+        c3.metric("Avg. Attendance", f"{round(att_percentage, 1)}%")
         
         st.divider()
 
-        # Visual Graphs
         m['term_rank'] = m['term'].map(TERM_ORDER)
         m = m.sort_values('term_rank')
         col_charts_1, col_charts_2 = st.columns(2)
@@ -213,7 +236,6 @@ elif role == "student":
 
         st.divider()
 
-        # AI Prediction & Intervention Logic
         st.subheader("🤖 Zein AI Future Outlook & Intervention")
         preds = []
         for s in m.subject.unique():
@@ -223,7 +245,6 @@ elif role == "student":
             
             p_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
             p_grade, _ = get_kcse_grade(p_val)
-            
             status = "✅ Stable" if p_val >= df_s.marks.mean() else "⚠️ Declining"
             
             preds.append({
@@ -236,9 +257,8 @@ elif role == "student":
         
         df_preds = pd.DataFrame(preds)
 
-        # Highlight "Declining" status or D/E grades in red
         def style_intervention(row):
             return ['color: red' if row.Status == "⚠️ Declining" or row['Projected Grade'] in ['D', 'D-', 'E'] else 'color: white'] * len(row)
 
         st.dataframe(df_preds.style.apply(style_intervention, axis=1), use_container_width=True)
-        st.caption("Intervention Required for subjects highlighted in RED.")
+        st.caption(f"Attendance calculated against {TOTAL_SCHOOL_DAYS} days per term.")
