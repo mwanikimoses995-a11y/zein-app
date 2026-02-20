@@ -14,7 +14,6 @@ STUDENTS_FILE = "students.csv"
 MARKS_FILE = "marks.csv"
 ATTENDANCE_FILE = "attendance.csv"
 
-# 8-4-4 Standard: Terms are typically 13 weeks (~65 school days)
 MAX_SCHOOL_DAYS = 65 
 
 TERMS = ["Term 1", "Term 2", "Term 3"]
@@ -39,7 +38,6 @@ def load_data(file, expected_cols, default_rows=None):
         df.to_csv(file, index=False)
         return df
     df = pd.read_csv(file)
-    # Ensure columns match expectations even if file existed
     if list(df.columns) != expected_cols:
         df = df.reindex(columns=expected_cols).fillna(0)
         df.to_csv(file, index=False)
@@ -49,7 +47,6 @@ def save(df, file):
     df.to_csv(file, index=False)
 
 def get_kcse_grade(marks):
-    """Standard KCSE Grading System"""
     if marks >= 80: return "A", 12
     if marks >= 75: return "A-", 11
     if marks >= 70: return "B+", 10
@@ -64,15 +61,13 @@ def get_kcse_grade(marks):
     return "E", 1
 
 def zein_predict(scores, terms):
-    """Linear Regression Trend Analysis"""
     if len(scores) < 2: 
         return scores[-1] if scores else 0
     try:
-        # np.polyfit calculates the slope and intercept
         coef = np.polyfit(terms, scores, 1)
         next_term_idx = max(terms) + 1
         prediction = coef[0] * next_term_idx + coef[1]
-        return max(0, min(100, prediction)) # Clamp between 0 and 100
+        return max(0, min(100, prediction))
     except: 
         return scores[-1]
 
@@ -123,35 +118,25 @@ if role == "admin":
             s_cls = st.selectbox("Assign Class", CLASSES)
             if st.button("Create Student"):
                 if s_name and s_name not in users.username.values:
-                    # Optimized row addition
-                    new_user = pd.DataFrame([[s_name, hash_password("1234"), "student"]], columns=users.columns)
-                    users = pd.concat([users, new_user], ignore_index=True)
-                    
-                    new_student = pd.DataFrame([[s_name, s_cls]], columns=students.columns)
-                    students = pd.concat([students, new_student], ignore_index=True)
-                    
-                    save(users, USERS_FILE)
-                    save(students, STUDENTS_FILE)
-                    st.success(f"Added {s_name}")
-                    st.rerun()
+                    users = pd.concat([users, pd.DataFrame([[s_name, hash_password("1234"), "student"]], columns=users.columns)], ignore_index=True)
+                    students = pd.concat([students, pd.DataFrame([[s_name, s_cls]], columns=students.columns)], ignore_index=True)
+                    save(users, USERS_FILE); save(students, STUDENTS_FILE)
+                    st.success(f"Added {s_name}"); st.rerun()
         with c2:
             st.subheader("Add Teacher")
             t_name = st.text_input("Teacher Username")
             if st.button("Create Teacher"):
                 if t_name and t_name not in users.username.values:
-                    new_user = pd.DataFrame([[t_name, hash_password("1234"), "teacher"]], columns=users.columns)
-                    users = pd.concat([users, new_user], ignore_index=True)
+                    users = pd.concat([users, pd.DataFrame([[t_name, hash_password("1234"), "teacher"]], columns=users.columns)], ignore_index=True)
                     save(users, USERS_FILE)
-                    st.success(f"Added {t_name}")
-                    st.rerun()
+                    st.success(f"Added {t_name}"); st.rerun()
     with t2:
         target_list = users[users.username != "admin"]["username"].tolist()
         if target_list:
             target = st.selectbox("Select User to Remove", target_list)
             if st.button("🔥 Delete User"):
                 users = users[users.username != target]
-                save(users, USERS_FILE)
-                st.rerun()
+                save(users, USERS_FILE); st.rerun()
 
 elif role == "teacher":
     st.header("👩‍🏫 Academic Management")
@@ -179,25 +164,18 @@ elif role == "teacher":
                         m_list = [marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)]["marks"].values[0] if not marks[(marks.student==s)&(marks.term==sel_term)&(marks.subject==subj)].empty else 0 for s in class_students]
                         res = st.data_editor(pd.DataFrame({"Student": class_students, "Marks": m_list}), key=f"bulk_{subj}")
                         if st.button(f"Save {subj}", key=f"btn_{subj}"):
-                            # Remove old and bulk append new
                             marks = marks[~((marks.term==sel_term)&(marks.subject==subj)&(marks.student.isin(class_students)))]
-                            new_rows = []
-                            for _, r in res.iterrows():
-                                new_rows.append([r.Student, sel_cls, sel_term, subj, r.Marks])
+                            new_rows = [[r.Student, sel_cls, sel_term, subj, r.Marks] for _, r in res.iterrows()]
                             marks = pd.concat([marks, pd.DataFrame(new_rows, columns=marks.columns)], ignore_index=True)
-                            save(marks, MARKS_FILE)
-                            st.rerun()
+                            save(marks, MARKS_FILE); st.rerun()
             else:
                 indiv_data = [{"Subject": s, "Marks": (marks[(marks.student==sel_student)&(marks.term==sel_term)&(marks.subject==s)]["marks"].values[0] if not marks[(marks.student==sel_student)&(marks.term==sel_term)&(marks.subject==s)].empty else 0)} for s in all_subs]
                 res_indiv = st.data_editor(pd.DataFrame(indiv_data), key="indiv_editor")
                 if st.button(f"Save Marks for {sel_student}"):
                     marks = marks[~((marks.student==sel_student)&(marks.term==sel_term))]
-                    new_rows = []
-                    for _, r in res_indiv.iterrows():
-                        new_rows.append([sel_student, sel_cls, sel_term, r.Subject, r.Marks])
+                    new_rows = [[sel_student, sel_cls, sel_term, r.Subject, r.Marks] for _, r in res_indiv.iterrows()]
                     marks = pd.concat([marks, pd.DataFrame(new_rows, columns=marks.columns)], ignore_index=True)
-                    save(marks, MARKS_FILE)
-                    st.rerun()
+                    save(marks, MARKS_FILE); st.rerun()
 
         with tab_a:
             st.info(f"Standard School Term: {MAX_SCHOOL_DAYS} Days")
@@ -206,24 +184,16 @@ elif role == "teacher":
                 res_att = st.data_editor(pd.DataFrame({"Student": class_students, "Days Present": att_list}), key="bulk_att")
                 if st.button("Save Attendance List"):
                     attendance = attendance[~((attendance.term==sel_term)&(attendance.student.isin(class_students)))]
-                    new_rows = []
-                    for _, r in res_att.iterrows():
-                        new_rows.append([r.Student, sel_cls, sel_term, min(r['Days Present'], MAX_SCHOOL_DAYS)])
+                    new_rows = [[r.Student, sel_cls, sel_term, min(r['Days Present'], MAX_SCHOOL_DAYS)] for _, r in res_att.iterrows()]
                     attendance = pd.concat([attendance, pd.DataFrame(new_rows, columns=attendance.columns)], ignore_index=True)
-                    save(attendance, ATTENDANCE_FILE)
-                    st.success("Saved!")
-                    st.rerun()
+                    save(attendance, ATTENDANCE_FILE); st.rerun()
             else:
-                match_att = attendance[(attendance.student==sel_student)&(attendance.term==sel_term)]
-                curr_att = match_att["days_present"].values[0] if not match_att.empty else 0
+                curr_att = attendance[(attendance.student==sel_student)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==sel_student)&(attendance.term==sel_term)].empty else 0
                 new_att = st.number_input(f"Days Present (Max {MAX_SCHOOL_DAYS})", 0, MAX_SCHOOL_DAYS, int(curr_att))
                 if st.button(f"Update Attendance for {sel_student}"):
                     attendance = attendance[~((attendance.student==sel_student)&(attendance.term==sel_term))]
-                    new_row = pd.DataFrame([[sel_student, sel_cls, sel_term, new_att]], columns=attendance.columns)
-                    attendance = pd.concat([attendance, new_row], ignore_index=True)
-                    save(attendance, ATTENDANCE_FILE)
-                    st.success("Updated!")
-                    st.rerun()
+                    attendance = pd.concat([attendance, pd.DataFrame([[sel_student, sel_cls, sel_term, new_att]], columns=attendance.columns)], ignore_index=True)
+                    save(attendance, ATTENDANCE_FILE); st.rerun()
 
 # =========================
 # STUDENT DASHBOARD
@@ -236,18 +206,11 @@ elif role == "student":
     if m.empty:
         st.info("Awaiting academic data entry...")
     else:
-        # Academic Calculation
         avg_score = m.marks.mean()
         current_grade, points = get_kcse_grade(avg_score)
-        
-        # Fixed DivisionByZero and logic errors in Attendance
         total_days = att_df.days_present.sum() if not att_df.empty else 0
         recorded_terms = len(att_df) if not att_df.empty else 0
-        
-        if recorded_terms > 0:
-            avg_att_pct = ((total_days / (recorded_terms * MAX_SCHOOL_DAYS))) * 100
-        else:
-            avg_att_pct = 0.0
+        avg_att_pct = ((total_days / (recorded_terms * MAX_SCHOOL_DAYS)) * 100) if recorded_terms > 0 else 0
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Mean Score", f"{round(avg_score, 1)}%")
@@ -255,27 +218,22 @@ elif role == "student":
         c3.metric("Avg. Attendance", f"{round(avg_att_pct, 1)}%")
         
         st.divider()
-
-        # Graphs
         m['term_rank'] = m['term'].map(TERM_ORDER)
         m = m.sort_values('term_rank')
         col_charts_1, col_charts_2 = st.columns(2)
 
         with col_charts_1:
             st.subheader("📊 Termly Mean Trend")
-            trend_data = m.groupby("term", sort=False)["marks"].mean()
-            st.bar_chart(trend_data) 
+            st.bar_chart(m.groupby("term", sort=False)["marks"].mean()) 
 
         with col_charts_2:
             st.subheader("🎯 Latest Subject Breakdown")
-            if not m.empty:
-                latest_term = m.iloc[-1]['term']
-                latest_marks = m[m.term == latest_term]
-                st.bar_chart(latest_marks.set_index("subject")["marks"])
+            latest_term = m.iloc[-1]['term']
+            st.bar_chart(m[m.term == latest_term].set_index("subject")["marks"])
 
         st.divider()
 
-        # AI Prediction
+        # AI Prediction with Conditional Green/Red Coloring
         st.subheader("🤖 Zein AI Future Outlook & Intervention")
         preds = []
         for s in m.subject.unique():
@@ -285,8 +243,10 @@ elif role == "student":
             
             p_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
             p_grade, _ = get_kcse_grade(p_val)
-            # Compare against mean of that specific subject
-            status = "✅ Stable" if p_val >= df_s.marks.mean() else "⚠️ Declining"
+            
+            # Logic for Red (Weak/Declining) vs Green (Stable)
+            is_weak = p_val < df_s.marks.mean() or p_grade in ['D', 'D-', 'E']
+            status = "⚠️ Decline" if is_weak else "✅ Stable"
             
             preds.append({
                 "Subject": s, 
@@ -296,13 +256,14 @@ elif role == "student":
                 "Status": status
             })
         
-        if preds:
-            df_preds = pd.DataFrame(preds)
+        df_preds = pd.DataFrame(preds)
 
-            def style_intervention(row):
-                # Apply red color for warning signs
-                condition = row.Status == "⚠️ Declining" or row['Projected Grade'] in ['D', 'D-', 'E']
-                return ['color: red' if condition else 'color: white'] * len(row)
+        # Highlight function: Red for decline/weak, Green for stable
+        def style_status(row):
+            if "Decline" in row.Status:
+                return ['color: #ff4b4b'] * len(row) # Standard Streamlit Red
+            else:
+                return ['color: #28a745'] * len(row) # Success Green
 
-            st.dataframe(df_preds.style.apply(style_intervention, axis=1), use_container_width=True)
-            st.caption(f"Intervention Required for red items. Attendance calculation based on a {MAX_SCHOOL_DAYS}-day term standard.")
+        st.dataframe(df_preds.style.apply(style_status, axis=1), use_container_width=True)
+        st.caption(f"Note: Red highlights indicate a projected drop or critical grade. Attendance based on {MAX_SCHOOL_DAYS}-day terms.")
