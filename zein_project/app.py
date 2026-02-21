@@ -83,7 +83,7 @@ attendance = load_data(ATTENDANCE_FILE, ["student", "class", "term", "days_prese
 # LOGIN
 # =========================
 if "user" not in st.session_state:
-    st.title("🎓 Zein School  Login")
+    st.title("🎓 Zein School Login")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -105,23 +105,23 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # =========================
-# ADMIN / TEACHER SECTIONS
+# ADMIN SECTION
 # =========================
 if role == "admin":
     st.header("🛠 Admin Dashboard")
     t1, t2 = st.tabs(["Add Accounts", "System Clean-up"])
     with t1:
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             st.subheader("Add Student")
-            s_name = st.text_input("Full Name")
+            s_full_name = st.text_input("Student Full Name")
             s_cls = st.selectbox("Assign Class", CLASSES)
             if st.button("Create Student"):
-                if s_name and s_name not in users.username.values:
-                    users = pd.concat([users, pd.DataFrame([[s_name, hash_password("1234"), "student"]], columns=users.columns)], ignore_index=True)
-                    students = pd.concat([students, pd.DataFrame([[s_name, s_cls]], columns=students.columns)], ignore_index=True)
+                if s_full_name and s_full_name not in users.username.values:
+                    users = pd.concat([users, pd.DataFrame([[s_full_name, hash_password("1234"), "student"]], columns=users.columns)], ignore_index=True)
+                    students = pd.concat([students, pd.DataFrame([[s_full_name, s_cls]], columns=students.columns)], ignore_index=True)
                     save(users, USERS_FILE); save(students, STUDENTS_FILE)
-                    st.success(f"Added {s_name}"); st.rerun()
+                    st.success(f"Added {s_full_name}"); st.rerun()
         with c2:
             st.subheader("Add Teacher")
             t_name = st.text_input("Teacher Username")
@@ -130,6 +130,27 @@ if role == "admin":
                     users = pd.concat([users, pd.DataFrame([[t_name, hash_password("1234"), "teacher"]], columns=users.columns)], ignore_index=True)
                     save(users, USERS_FILE)
                     st.success(f"Added {t_name}"); st.rerun()
+        with c3:
+            st.subheader("Add Parent")
+            if not students.empty:
+                target_student = st.selectbox("Select Child", students["student"].unique())
+                p_username = f"{target_student}1"
+                # Logic: Password is the first name of the child
+                p_password_plain = target_student.split()[0] 
+                
+                st.info(f"User: **{p_username}**")
+                st.info(f"Pass: **{p_password_plain}**")
+                
+                if st.button("Generate Parent Account"):
+                    if p_username not in users.username.values:
+                        users = pd.concat([users, pd.DataFrame([[p_username, hash_password(p_password_plain), "parent"]], columns=users.columns)], ignore_index=True)
+                        save(users, USERS_FILE)
+                        st.success(f"Account Active for {target_student}"); st.rerun()
+                    else:
+                        st.error("Account already exists.")
+            else:
+                st.warning("No students registered yet.")
+
     with t2:
         target_list = users[users.username != "admin"]["username"].tolist()
         if target_list:
@@ -138,6 +159,9 @@ if role == "admin":
                 users = users[users.username != target]
                 save(users, USERS_FILE); st.rerun()
 
+# =========================
+# TEACHER SECTION
+# =========================
 elif role == "teacher":
     st.header("👩‍🏫 Academic Management")
     col1, col2, col3 = st.columns(3)
@@ -178,7 +202,6 @@ elif role == "teacher":
                     save(marks, MARKS_FILE); st.rerun()
 
         with tab_a:
-            st.info(f"Standard School Term: {MAX_SCHOOL_DAYS} Days")
             if sel_student == "-- All Students --":
                 att_list = [attendance[(attendance.student==s)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==s)&(attendance.term==sel_term)].empty else 0 for s in class_students]
                 res_att = st.data_editor(pd.DataFrame({"Student": class_students, "Days Present": att_list}), key="bulk_att")
@@ -189,22 +212,27 @@ elif role == "teacher":
                     save(attendance, ATTENDANCE_FILE); st.rerun()
             else:
                 curr_att = attendance[(attendance.student==sel_student)&(attendance.term==sel_term)]["days_present"].values[0] if not attendance[(attendance.student==sel_student)&(attendance.term==sel_term)].empty else 0
-                new_att = st.number_input(f"Days Present (Max {MAX_SCHOOL_DAYS})", 0, MAX_SCHOOL_DAYS, int(curr_att))
-                if st.button(f"Update Attendance for {sel_student}"):
+                new_att = st.number_input(f"Days Present", 0, MAX_SCHOOL_DAYS, int(curr_att))
+                if st.button(f"Update Attendance"):
                     attendance = attendance[~((attendance.student==sel_student)&(attendance.term==sel_term))]
                     attendance = pd.concat([attendance, pd.DataFrame([[sel_student, sel_cls, sel_term, new_att]], columns=attendance.columns)], ignore_index=True)
                     save(attendance, ATTENDANCE_FILE); st.rerun()
 
 # =========================
-# STUDENT DASHBOARD
+# STUDENT & PARENT VIEW
 # =========================
-elif role == "student":
-    st.header(f"📊 Performance Analysis: {user['username']}")
-    m = marks[marks.student == user["username"]].copy()
-    att_df = attendance[attendance.student == user["username"]].copy()
+elif role in ["student", "parent"]:
+    # Identify whose data to show
+    target_student = user["username"][:-1] if role == "parent" else user["username"]
+    
+    st.header(f"📊 {'Parent Portal' if role == 'parent' else 'Student Dashboard'}")
+    st.subheader(f"Academic Report for: {target_student}")
+    
+    m = marks[marks.student == target_student].copy()
+    att_df = attendance[attendance.student == target_student].copy()
     
     if m.empty:
-        st.info("Awaiting academic data entry...")
+        st.info("Academic records are still being processed.")
     else:
         avg_score = m.marks.mean()
         current_grade, points = get_kcse_grade(avg_score)
@@ -213,28 +241,27 @@ elif role == "student":
         avg_att_pct = ((total_days / (recorded_terms * MAX_SCHOOL_DAYS)) * 100) if recorded_terms > 0 else 0
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Mean Score", f"{round(avg_score, 1)}%")
-        c2.metric("Grade", current_grade, f"{points} Points")
-        c3.metric("Avg. Attendance", f"{round(avg_att_pct, 1)}%")
+        c1.metric("Current Mean Score", f"{round(avg_score, 1)}%")
+        c2.metric("KCSE Grade", current_grade, f"{points} Points")
+        c3.metric("Attendance Consistency", f"{round(avg_att_pct, 1)}%")
         
         st.divider()
         m['term_rank'] = m['term'].map(TERM_ORDER)
         m = m.sort_values('term_rank')
+        
         col_charts_1, col_charts_2 = st.columns(2)
-
         with col_charts_1:
-            st.subheader("📊 Termly Mean Trend")
-            st.bar_chart(m.groupby("term", sort=False)["marks"].mean()) 
+            st.subheader("📈 Performance Trend")
+            st.line_chart(m.groupby("term", sort=False)["marks"].mean()) 
 
         with col_charts_2:
-            st.subheader("🎯 Latest Subject Breakdown")
+            st.subheader("🎯 Latest Marks")
             latest_term = m.iloc[-1]['term']
             st.bar_chart(m[m.term == latest_term].set_index("subject")["marks"])
 
+        # AI Prediction Table
         st.divider()
-
-        # AI Prediction with Conditional Green/Red Coloring
-        st.subheader("🤖 Zein AI Future Outlook & Intervention")
+        st.subheader("🤖 Zein AI: Performance Forecast")
         preds = []
         for s in m.subject.unique():
             df_s = m[m.subject == s].copy()
@@ -243,27 +270,21 @@ elif role == "student":
             
             p_val = zein_predict(df_s.marks.tolist(), df_s.t_id.tolist())
             p_grade, _ = get_kcse_grade(p_val)
-            
-            # Logic for Red (Weak/Declining) vs Green (Stable)
             is_weak = p_val < df_s.marks.mean() or p_grade in ['D', 'D-', 'E']
-            status = "⚠️ Decline" if is_weak else "✅ Stable"
+            status = "⚠️ Action Required" if is_weak else "✅ On Track"
             
             preds.append({
                 "Subject": s, 
-                "Latest Mark (%)": df_s.marks.iloc[-1],
-                "AI Prediction (%)": round(p_val, 1),
+                "Latest Mark": f"{df_s.marks.iloc[-1]}%",
+                "AI Prediction": f"{round(p_val, 1)}%",
                 "Projected Grade": p_grade,
                 "Status": status
             })
         
         df_preds = pd.DataFrame(preds)
 
-        # Highlight function: Red for decline/weak, Green for stable
         def style_status(row):
-            if "Decline" in row.Status:
-                return ['color: #ff4b4b'] * len(row) # Standard Streamlit Red
-            else:
-                return ['color: #28a745'] * len(row) # Success Green
+            color = '#ff4b4b' if "Action" in row.Status else '#28a745'
+            return [f'color: {color}'] * len(row)
 
         st.dataframe(df_preds.style.apply(style_status, axis=1), use_container_width=True)
-        st.caption(f"Note: Red highlights indicate a projected drop or critical grade. Attendance based on {MAX_SCHOOL_DAYS}-day terms.")
