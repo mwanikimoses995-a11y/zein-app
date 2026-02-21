@@ -7,7 +7,7 @@ import numpy as np
 # =========================
 # CONFIG & FILE PATHS
 # =========================
-st.set_page_config(page_title="Zein School ERP AI", layout="wide")
+st.set_page_config(page_title="Zein School AI", layout="wide")
 
 USERS_FILE = "users.csv"
 STUDENTS_FILE = "students.csv"
@@ -83,7 +83,7 @@ attendance = load_data(ATTENDANCE_FILE, ["student", "class", "term", "days_prese
 # LOGIN
 # =========================
 if "user" not in st.session_state:
-    st.title("🎓 Zein School ERP Login")
+    st.title("🎓 Zein School  Login")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -98,7 +98,7 @@ if "user" not in st.session_state:
 user = st.session_state.user
 role = user["role"]
 
-st.sidebar.title("Zein ERP")
+st.sidebar.title("Zein")
 st.sidebar.write(f"👤 **{user['username']}**")
 if st.sidebar.button("Logout"):
     st.session_state.clear()
