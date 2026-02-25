@@ -3,8 +3,16 @@ import pandas as pd
 import os
 import hashlib
 import io
-import plotly.express as px  # Added for the teacher analytics
 from datetime import datetime
+
+# =========================
+# SAFETY IMPORT CHECK
+# =========================
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
 
 # =========================
 # CONFIG & FILE PATHS
@@ -63,9 +71,7 @@ def load_data(key):
         df = pd.DataFrame(columns=expected)
         df.to_csv(file, index=False)
         return df
-    # Ensure all columns are read as strings to prevent ADM/Phone number truncation/errors
     df = pd.read_csv(file, dtype=str)
-    # Convert marks to numeric if loading marks
     if key == "marks" and not df.empty:
         df['marks'] = pd.to_numeric(df['marks'], errors='coerce')
     return df
@@ -192,7 +198,6 @@ elif role == "admin":
             df_up['status'] = "Active"
             students = pd.concat([students, df_up], ignore_index=True).drop_duplicates('adm_no', keep='last')
             save(students, "students")
-            # Account generation logic simplified for stability
             st.success(f"Enrolled {len(df_up)} students. Note: Students use '1234' as default pass.")
 
     with t3:
@@ -242,12 +247,16 @@ elif role == "teacher":
         else: st.info("No active students found in this grade.")
 
     with t_tab2:
-        # Teacher Performance Chart
-        class_marks = marks[(marks.school == my_school) & (marks.subject == assigned_subj) & (marks.year == CURRENT_YEAR) & (marks.term == sel_t)]
-        if not class_marks.empty:
-            fig = px.bar(class_marks, x='adm_no', y='marks', title=f"Class Performance: {assigned_subj} ({sel_t})", color='marks', color_continuous_scale='RdYlGn')
-            st.plotly_chart(fig, use_container_width=True)
-        else: st.info("No mark data available for analysis yet.")
+        # Safety Check for Analytics
+        if not HAS_PLOTLY:
+            st.error("📉 **Analytics Unavailable**: The `plotly` library is not installed.")
+            st.info("To fix this, please run: `pip install plotly` in your terminal.")
+        else:
+            class_marks = marks[(marks.school == my_school) & (marks.subject == assigned_subj) & (marks.year == CURRENT_YEAR) & (marks.term == sel_t)]
+            if not class_marks.empty:
+                fig = px.bar(class_marks, x='adm_no', y='marks', title=f"Class Performance: {assigned_subj} ({sel_t})", color='marks', color_continuous_scale='RdYlGn')
+                st.plotly_chart(fig, use_container_width=True)
+            else: st.info("No mark data available for analysis yet.")
 
 # =========================
 # STUDENT / PARENT
