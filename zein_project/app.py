@@ -79,12 +79,13 @@ def load_data(key):
 def save(df, key):
     df.to_csv(FILES[key], index=False)
 
-# Initial Load
+# Initial Data Load
 schools = load_data("schools")
 users = load_data("users")
 students = load_data("students")
 marks = load_data("marks")
 
+# Create SuperAdmin if system is new
 if "zein" not in users['username'].values:
     superadmin = pd.DataFrame([["zein", hash_password("mionmion"), "superadmin", "SYSTEM", "000", "founder", "False", "All"]], columns=COLS["users"])
     users = pd.concat([users, superadmin], ignore_index=True)
@@ -118,9 +119,9 @@ if "user" not in st.session_state:
 
 logged_in_user = st.session_state.user
 
-# First Login Password Force (Applies to Admin and Teachers)
+# MANDATORY: Set Password on First Login (For Admin & Teacher)
 if str(logged_in_user.get("first_login")) == "True":
-    st.warning("🔒 Security: Please set your permanent password before proceeding.")
+    st.warning("🔒 Security: You are using a temporary account. Please set your permanent password.")
     new_p = st.text_input("New Password", type="password")
     conf_p = st.text_input("Confirm New Password", type="password")
     if st.button("Activate Account"):
@@ -132,7 +133,7 @@ if str(logged_in_user.get("first_login")) == "True":
         else: st.error("Passwords must match and be 4+ characters.")
     st.stop()
 
-# Sidebar
+# Dashboard Sidebar
 role, my_school = logged_in_user["role"], str(logged_in_user["school"])
 st.sidebar.title("Zein AI")
 st.sidebar.write(f"User: **{logged_in_user['username']}**")
@@ -193,12 +194,10 @@ elif role == "admin":
         up = st.file_uploader("Upload CSV", type="csv")
         if up and st.button("Process Bulk Upload"):
             df_up = pd.read_csv(up, dtype=str)
-            df_up['school'] = my_school
-            df_up['reg_year'] = CURRENT_YEAR
-            df_up['status'] = "Active"
+            df_up['school'], df_up['reg_year'], df_up['status'] = my_school, CURRENT_YEAR, "Active"
             students = pd.concat([students, df_up], ignore_index=True).drop_duplicates('adm_no', keep='last')
             save(students, "students")
-            st.success(f"Enrolled {len(df_up)} students. Note: Students use '1234' as default pass.")
+            st.success(f"Enrolled {len(df_up)} students.")
 
     with t3:
         with st.form("teacher_reg"):
@@ -207,7 +206,7 @@ elif role == "admin":
             if st.form_submit_button("Register Staff"):
                 new_t = pd.DataFrame([[t_user, hash_password(t_user), "teacher", my_school, "000", "Staff", "True", t_subj]], columns=COLS["users"])
                 users = pd.concat([users, new_t], ignore_index=True).drop_duplicates('username', keep='last')
-                save(users, "users"); st.success("Staff added. Initial password is their username.")
+                save(users, "users"); st.success(f"Teacher {t_user} registered. Their username is their temporary password.")
 
     with t4:
         st.warning("Annual Promotion moves students to the next grade.")
@@ -228,7 +227,7 @@ elif role == "teacher":
     assigned_subj = logged_in_user.get("assigned_subject", "Not Assigned")
     st.header(f"📝 {assigned_subj} Portal")
     
-    t_tab1, t_tab2 = st.tabs(["Entry", "Class Analytics"])
+    t_tab1, t_tab2 = st.tabs(["Marks Entry", "Class Analytics"])
     
     lvl = schools[schools.school_name==my_school].iloc[0]['type']
     sel_g = st.sidebar.selectbox("Grade", LEVEL_OPTIONS.get(lvl, []))
@@ -243,20 +242,18 @@ elif role == "teacher":
                 new_marks = [[str(r['adm_no']), my_school, CURRENT_YEAR, sel_t, assigned_subj, r['Score']] for _, r in edited.iterrows()]
                 marks = pd.concat([marks, pd.DataFrame(new_marks, columns=COLS["marks"])], ignore_index=True)
                 marks = marks.drop_duplicates(subset=['adm_no', 'year', 'term', 'subject'], keep='last')
-                save(marks, "marks"); st.success("Records saved successfully.")
+                save(marks, "marks"); st.success("Marks synced successfully.")
         else: st.info("No active students found in this grade.")
 
     with t_tab2:
-        # Safety Check for Analytics
         if not HAS_PLOTLY:
-            st.error("📉 **Analytics Unavailable**: The `plotly` library is not installed.")
-            st.info("To fix this, please run: `pip install plotly` in your terminal.")
+            st.error("📉 Analytics Unavailable: Please run `pip install plotly`.")
         else:
             class_marks = marks[(marks.school == my_school) & (marks.subject == assigned_subj) & (marks.year == CURRENT_YEAR) & (marks.term == sel_t)]
             if not class_marks.empty:
-                fig = px.bar(class_marks, x='adm_no', y='marks', title=f"Class Performance: {assigned_subj} ({sel_t})", color='marks', color_continuous_scale='RdYlGn')
+                fig = px.bar(class_marks, x='adm_no', y='marks', title=f"{assigned_subj} Performance", color='marks', color_continuous_scale='RdYlGn')
                 st.plotly_chart(fig, use_container_width=True)
-            else: st.info("No mark data available for analysis yet.")
+            else: st.info("No mark data available yet.")
 
 # =========================
 # STUDENT / PARENT
@@ -267,7 +264,7 @@ elif role in ["parent", "student"]:
     my_stds = students[students.parent_phone == search_id] if role == 'parent' else students[students.adm_no == search_id]
     
     if not my_stds.empty:
-        s_adm = st.selectbox("Select Student Profile", my_stds.adm_no.unique())
+        s_adm = st.selectbox("Select Profile", my_stds.adm_no.unique())
         info = my_stds[my_stds.adm_no == s_adm].iloc[0]
         st.subheader(f"{info['name']} | ADM: {info['adm_no']}")
         
@@ -283,10 +280,4 @@ elif role in ["parent", "student"]:
                     if not t_data.empty:
                         avg = t_data['marks'].mean()
                         cols[i].metric(f"{t} Average", f"{avg:.1f}%", get_grade(avg))
-            else: st.info("No results found for this year.")
-        with tab_a:
-            past = marks[(marks.adm_no == str(s_adm)) & (marks.year != CURRENT_YEAR)]
-            if not past.empty:
-                y_sel = st.selectbox("Past Year", sorted(past.year.unique(), reverse=True))
-                st.dataframe(past[past.year == y_sel].pivot_table(index='subject', columns='term', values='marks', aggfunc='last'))
-            else: st.info("No archive records.")
+            else: st.info("No current results.")
