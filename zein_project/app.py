@@ -32,10 +32,17 @@ LEVEL_OPTIONS = {
 }
 
 # =========================
-# UTILITIES
+# UTILITIES & ANALYTICS
 # =========================
 def hash_password(p):
     return hashlib.sha256(str(p).encode()).hexdigest()
+
+def get_grade(score):
+    if score >= 80: return "A"
+    if score >= 70: return "B"
+    if score >= 60: return "C"
+    if score >= 50: return "D"
+    return "E"
 
 def load_data(key):
     file = FILES[key]
@@ -65,167 +72,170 @@ if "zein" not in users['username'].values:
     save(users, "users")
 
 # =========================
-# LOGIN & PASSWORD SETUP
+# LOGIN SYSTEM
 # =========================
 if "user" not in st.session_state:
     st.title("🛡️ Zein School AI Portal")
     tab_login, tab_forgot = st.tabs(["Sign In", "Forgot Password"])
     
     with tab_login:
-        u_input = st.text_input("Username").strip()
+        u_input = st.text_input("Username / ADM / Phone").strip()
         p_input = st.text_input("Password", type="password").strip()
-        
         if st.button("Sign In", use_container_width=True):
             user_match = users[users.username == u_input]
-            if not user_match.empty:
-                db_pass = user_match.iloc[0]['password']
-                if db_pass == hash_password(p_input):
-                    st.session_state.user = user_match.iloc[0].to_dict()
-                    st.rerun()
-                else: st.error("Invalid credentials.")
-            else: st.error("User not found.")
+            if not user_match.empty and user_match.iloc[0]['password'] == hash_password(p_input):
+                st.session_state.user = user_match.iloc[0].to_dict()
+                st.rerun()
+            else: st.error("Invalid credentials.")
 
     with tab_forgot:
         rec_u = st.text_input("Username for Recovery").strip()
         if rec_u:
             user_row = users[users.username == rec_u]
             if not user_row.empty:
-                st.info(f"**Hint:** {user_row.iloc[0]['recovery_hint']}")
+                st.info(f"**Your Hint:** {user_row.iloc[0]['recovery_hint']}")
             else: st.error("User not found.")
     st.stop()
 
-# Force Password Reset on First Login
+# Force Password Update for Admins
 logged_in_user = st.session_state.user
 if str(logged_in_user.get("first_login")) == "True":
-    st.warning("🔒 Security: Set your permanent password.")
+    st.warning("🔒 First Login: Set your permanent password.")
     new_p = st.text_input("New Password", type="password")
-    conf_p = st.text_input("Confirm Password", type="password")
-    if st.button("Activate Account"):
-        if new_p == conf_p and len(new_p) > 3:
-            users.loc[users.username == logged_in_user['username'], ['password', 'first_login']] = [hash_password(new_p), "False"]
-            save(users, "users")
-            st.success("Success! Please re-login.")
-            st.session_state.clear()
-            st.rerun()
-        else: st.error("Invalid password match.")
+    if st.button("Confirm Password"):
+        users.loc[users.username == logged_in_user['username'], ['password', 'first_login']] = [hash_password(new_p), "False"]
+        save(users, "users")
+        st.success("Updated! Logging out..."); st.session_state.clear(); st.rerun()
     st.stop()
 
-# Sidebar Setup
+# Layout
 role = logged_in_user["role"]
 my_school = str(logged_in_user["school"])
 st.sidebar.title("Zein AI")
-st.sidebar.info(f"User: {logged_in_user['username']}\nSchool: {my_school}")
+st.sidebar.write(f"Logged: **{logged_in_user['username']}**")
 if st.sidebar.button("Logout"):
-    st.session_state.clear()
-    st.rerun()
+    st.session_state.clear(); st.rerun()
 
 # =========================
-# ROLES LOGIC
+# SUPERADMIN
 # =========================
-
 if role == "superadmin":
     st.header("🌐 Global Master Controller")
     c1, c2 = st.columns([1, 2])
     with c1:
-        s_name = st.text_input("Institution Name (Admin Username)").strip()
-        s_type = st.selectbox("Level", ["Junior", "Senior", "Both"])
+        s_name = st.text_input("School Name (Admin Username)").strip()
+        s_lvl = st.selectbox("School Level", ["Junior", "Senior", "Both"])
         if st.button("Activate School"):
-            if s_name and s_name not in schools['school_name'].values:
-                schools = pd.concat([schools, pd.DataFrame([[s_name, s_type, "Active"]], columns=COLS["schools"])], ignore_index=True)
+            if s_name:
+                schools = pd.concat([schools, pd.DataFrame([[s_name, s_lvl, "Active"]], columns=COLS["schools"])], ignore_index=True)
                 save(schools, "schools")
-                new_a = pd.DataFrame([[s_name, hash_password(s_name), "admin", s_name, "000", "Initial", "True"]], columns=COLS["users"])
-                users = pd.concat([users, new_a], ignore_index=True)
+                new_u = pd.DataFrame([[s_name, hash_password(s_name), "admin", s_name, "000", "Admin", "True"]], columns=COLS["users"])
+                users = pd.concat([users, new_u], ignore_index=True)
                 save(users, "users")
-                st.success(f"{s_name} active. Password is '{s_name}'")
+                st.success(f"Activated. Temp Pass: {s_name}")
     with c2: st.dataframe(schools)
 
+# =========================
+# ADMIN: ENROLL & PROMOTE
+# =========================
 elif role == "admin":
     st.header(f"🏫 Admin Hub: {my_school}")
-    sch_type = schools[schools.school_name == my_school].iloc[0]['type']
-    t1, t2, t3 = st.tabs(["Enrollment", "Staff", "Promotion System"])
-
+    t1, t2, t3 = st.tabs(["Enrollment", "Staff Management", "Promotion System"])
+    
     with t1:
         with st.form("enroll", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            adm = col1.text_input("ADM Number")
+            adm = col1.text_input("Admission Number")
             kemis = col1.text_input("KEMIS Number")
-            name = col1.text_input("Full Name")
-            grade = col2.selectbox("Grade", LEVEL_OPTIONS.get(sch_type, ["Grade 7"]))
-            p_phone = col2.text_input("Parent Phone")
-            p_hint = col2.text_input("Recovery Hint")
-            if st.form_submit_button("Register Student"):
-                if all([adm, kemis, name, p_phone]):
-                    s_data = pd.DataFrame([[adm, kemis, name, grade, my_school, p_phone, CURRENT_YEAR, "Active"]], columns=COLS["students"])
-                    students = pd.concat([students, s_data], ignore_index=True)
-                    save(students, "students")
-                    u_data = pd.DataFrame([
-                        [p_phone, hash_password(p_phone), "parent", my_school, p_phone, p_hint, "False"],
-                        [adm, hash_password("1234"), "student", my_school, p_phone, "1234", "False"]
-                    ], columns=COLS["users"])
-                    users = pd.concat([users, u_data], ignore_index=True).drop_duplicates('username', keep='last')
-                    save(users, "users")
-                    st.success("Accounts Created.")
+            name = col1.text_input("Student Name")
+            grade = col2.selectbox("Grade", LEVEL_OPTIONS.get(schools[schools.school_name==my_school].iloc[0]['type'], ["Grade 7"]))
+            p_phone = col2.text_input("Parent Phone (Login)")
+            hint = col2.text_input("Recovery Hint")
+            if st.form_submit_button("Complete Registration"):
+                students = pd.concat([students, pd.DataFrame([[adm, kemis, name, grade, my_school, p_phone, CURRENT_YEAR, "Active"]], columns=COLS["students"])], ignore_index=True)
+                save(students, "students")
+                u_data = pd.DataFrame([
+                    [p_phone, hash_password(p_phone), "parent", my_school, p_phone, hint, "False"],
+                    [adm, hash_password("1234"), "student", my_school, p_phone, "1234", "False"]
+                ], columns=COLS["users"])
+                users = pd.concat([users, u_data], ignore_index=True).drop_duplicates('username', keep='last')
+                save(users, "users"); st.success("Accounts Synchronized.")
 
     with t3:
-        st.subheader("End of Year Promotion")
-        st.warning("This will advance all students to the next grade level.")
-        if st.button("Promote All Students"):
-            for i, row in students[students.school == my_school].iterrows():
-                current_grade = row['class']
-                all_grades = LEVEL_OPTIONS.get(sch_type, [])
-                if current_grade in all_grades:
-                    idx = all_grades.index(current_grade)
-                    if idx + 1 < len(all_grades):
-                        students.at[i, 'class'] = all_grades[idx+1]
-                    else:
-                        students.at[i, 'status'] = "Alumni"
-            save(students, "students")
-            st.success("Promotion Completed!")
+        st.warning("⚠️ PROMOTION SYSTEM: This advances all active students to the next level.")
+        if st.button("Run End of Year Promotion"):
+            sch_lvl = schools[schools.school_name==my_school].iloc[0]['type']
+            lvl_list = LEVEL_OPTIONS.get(sch_lvl, [])
+            for i, r in students[students.school == my_school].iterrows():
+                if r['status'] == "Active":
+                    try:
+                        idx = lvl_list.index(r['class'])
+                        if idx + 1 < len(lvl_list): students.at[i, 'class'] = lvl_list[idx+1]
+                        else: students.at[i, 'status'] = "Alumni"
+                    except: pass
+            save(students, "students"); st.success("Promotion sequence completed.")
 
+# =========================
+# TEACHER
+# =========================
 elif role == "teacher":
-    st.header("📝 Academic Entry")
-    sch_type = schools[schools.school_name == my_school].iloc[0]['type']
-    sel_cls = st.sidebar.selectbox("Grade", LEVEL_OPTIONS.get(sch_type, []))
-    sel_term = st.sidebar.selectbox("Term", TERMS)
+    st.header("📝 Marks Management")
+    lvl = schools[schools.school_name==my_school].iloc[0]['type']
+    sel_g = st.sidebar.selectbox("Grade", LEVEL_OPTIONS.get(lvl, []))
+    sel_t = st.sidebar.selectbox("Term", TERMS)
     
-    active_stds = students[(students.school == my_school) & (students['class'] == sel_cls) & (students.status == "Active")]
-    
-    if not active_stds.empty:
-        subj = st.text_input("Subject").strip()
+    cl_stds = students[(students.school == my_school) & (students['class'] == sel_g) & (students.status == "Active")]
+    if not cl_stds.empty:
+        subj = st.text_input("Enter Subject Name").strip()
         if subj:
-            df_entry = pd.DataFrame({"adm_no": active_stds.adm_no.values, "Name": active_stds.name.values, "Marks": 0.0})
-            edited = st.data_editor(df_entry, use_container_width=True, hide_index=True)
-            if st.button("Save Grades"):
-                new_m = [[str(r['adm_no']), my_school, CURRENT_YEAR, sel_term, subj, r['Marks']] for _, r in edited.iterrows()]
-                marks = pd.concat([marks, pd.DataFrame(new_m, columns=COLS["marks"])], ignore_index=True)
+            entry = pd.DataFrame({"adm_no": cl_stds.adm_no.values, "Name": cl_stds.name.values, "Score": 0.0})
+            edited = st.data_editor(entry, use_container_width=True, hide_index=True)
+            if st.button("Finalize Grades"):
+                rows = [[str(r['adm_no']), my_school, CURRENT_YEAR, sel_t, subj, r['Score']] for _, r in edited.iterrows()]
+                marks = pd.concat([marks, pd.DataFrame(rows, columns=COLS["marks"])], ignore_index=True)
                 marks = marks.drop_duplicates(subset=['adm_no', 'year', 'term', 'subject'], keep='last')
-                save(marks, "marks"); st.success("Grades recorded.")
-    else: st.info("No active students in this grade.")
+                save(marks, "marks"); st.success("Data Uploaded.")
+    else: st.info("No active students found.")
 
+# =========================
+# STUDENT / PARENT (RESULTS & ARCHIVE)
+# =========================
 elif role in ["parent", "student"]:
-    st.header("📊 Results Center")
+    st.header("📊 Performance Analytics")
     search = logged_in_user['username']
     my_stds = students[students.parent_phone == search] if role == 'parent' else students[students.adm_no == search]
     
     if not my_stds.empty:
-        sel_adm = st.selectbox("Select Student", my_stds.adm_no.unique())
-        std_info = my_stds[my_stds.adm_no == sel_adm].iloc[0]
+        s_adm = st.selectbox("Select Profile", my_stds.adm_no.unique())
+        info = my_stds[my_stds.adm_no == s_adm].iloc[0]
+        st.subheader(f"{info['name']} | ADM: {info['adm_no']} | KEMIS: {info['kemis_no']}")
         
-        st.subheader(f"{std_info['name']} ({std_info['class']})")
+        tab1, tab2 = st.tabs(["Current Progress", "Archives (Past Years)"])
         
-        tab_current, tab_history = st.tabs(["Current Year Results", "Past Years Archive"])
-        
-        with tab_current:
-            c_marks = marks[(marks.adm_no == str(sel_adm)) & (marks.year == CURRENT_YEAR)]
-            if not c_marks.empty:
-                st.table(c_marks.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-"))
-            else: st.warning("No marks for this year.")
-            
-        with tab_history:
-            h_marks = marks[(marks.adm_no == str(sel_adm)) & (marks.year != CURRENT_YEAR)]
+        with tab1:
+            y_marks = marks[(marks.adm_no == str(s_adm)) & (marks.year == CURRENT_YEAR)]
+            if not y_marks.empty:
+                # Table
+                pivot = y_marks.pivot_table(index='subject', columns='term', values='marks', aggfunc='last')
+                st.table(pivot.fillna("-"))
+                
+                # --- SUMMARY CARD ---
+                st.divider()
+                st.subheader("🏁 Term Summary (Mean Scores)")
+                summary_cols = st.columns(3)
+                for i, term in enumerate(TERMS):
+                    t_data = y_marks[y_marks.term == term]
+                    if not t_data.empty:
+                        mean = t_data['marks'].mean()
+                        summary_cols[i].metric(f"{term} Mean", f"{mean:.2f}%", f"Grade: {get_grade(mean)}")
+            else: st.warning("No data for the current academic year.")
+
+        with tab2:
+            h_marks = marks[(marks.adm_no == str(s_adm)) & (marks.year != CURRENT_YEAR)]
             if not h_marks.empty:
-                years = sorted(h_marks.year.unique(), reverse=True)
-                sel_year = st.selectbox("Select Past Year", years)
-                y_data = h_marks[h_marks.year == sel_year]
-                st.dataframe(y_data.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-"))
-            else: st.info("No historical data available.")
+                sel_y = st.selectbox("Choose Past Year", sorted(h_marks.year.unique(), reverse=True))
+                hist = h_marks[h_marks.year == sel_y]
+                st.dataframe(hist.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-"))
+                st.info(f"Summary for {sel_y}: Mean Score {hist['marks'].mean():.2f}%")
+            else: st.info("No historical data found in the archive.")
+    else: st.error("Account not linked to any student profile.")
