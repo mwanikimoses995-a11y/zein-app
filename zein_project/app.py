@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import hashlib
-import io
 from datetime import datetime
 
 # =========================
@@ -19,8 +18,8 @@ FILES = {
 
 COLS = {
     "schools": ["school_name", "type", "status"],
-    "users": ["username", "password", "role", "school", "phone", "recovery_hint"],
-    "students": ["adm_no", "name", "class", "school", "parent_phone", "reg_year"],
+    "users": ["username", "password", "role", "school", "phone", "recovery_hint", "first_login"],
+    "students": ["adm_no", "kemis_no", "name", "class", "school", "parent_phone", "reg_year", "status"],
     "marks": ["adm_no", "school", "year", "term", "subject", "marks"]
 }
 
@@ -59,206 +58,174 @@ users = load_data("users")
 students = load_data("students")
 marks = load_data("marks")
 
-# Global Superadmin Creation
+# Create Global Superadmin
 if "zein" not in users['username'].values:
-    superadmin = pd.DataFrame([["zein", hash_password("mionmion"), "superadmin", "SYSTEM", "000", "founder"]], columns=COLS["users"])
+    superadmin = pd.DataFrame([["zein", hash_password("mionmion"), "superadmin", "SYSTEM", "000", "founder", "False"]], columns=COLS["users"])
     users = pd.concat([users, superadmin], ignore_index=True)
     save(users, "users")
 
 # =========================
-# LOGIN & RECOVERY SYSTEM
+# LOGIN & PASSWORD SETUP
 # =========================
 if "user" not in st.session_state:
     st.title("🛡️ Zein School AI Portal")
     tab_login, tab_forgot = st.tabs(["Sign In", "Forgot Password"])
     
     with tab_login:
-        with st.container(border=True):
-            u = st.text_input("Username / Parent Phone").strip()
-            p = st.text_input("Password", type="password").strip()
-            if st.button("Sign In", use_container_width=True):
-                match = users[(users.username == u) & (users.password == hash_password(p))]
-                if not match.empty:
-                    st.session_state.user = match.iloc[0].to_dict()
+        u_input = st.text_input("Username").strip()
+        p_input = st.text_input("Password", type="password").strip()
+        
+        if st.button("Sign In", use_container_width=True):
+            user_match = users[users.username == u_input]
+            if not user_match.empty:
+                db_pass = user_match.iloc[0]['password']
+                if db_pass == hash_password(p_input):
+                    st.session_state.user = user_match.iloc[0].to_dict()
                     st.rerun()
                 else: st.error("Invalid credentials.")
-    
+            else: st.error("User not found.")
+
     with tab_forgot:
-        st.info("Enter your username to see your recovery hint.")
         rec_u = st.text_input("Username for Recovery").strip()
         if rec_u:
             user_row = users[users.username == rec_u]
             if not user_row.empty:
-                st.write(f"**Your Security Hint:** {user_row.iloc[0]['recovery_hint']}")
-                st.caption("Contact your School Admin to reset if you still can't log in.")
+                st.info(f"**Hint:** {user_row.iloc[0]['recovery_hint']}")
             else: st.error("User not found.")
     st.stop()
 
-# Session Globals
+# Force Password Reset on First Login
 logged_in_user = st.session_state.user
+if str(logged_in_user.get("first_login")) == "True":
+    st.warning("🔒 Security: Set your permanent password.")
+    new_p = st.text_input("New Password", type="password")
+    conf_p = st.text_input("Confirm Password", type="password")
+    if st.button("Activate Account"):
+        if new_p == conf_p and len(new_p) > 3:
+            users.loc[users.username == logged_in_user['username'], ['password', 'first_login']] = [hash_password(new_p), "False"]
+            save(users, "users")
+            st.success("Success! Please re-login.")
+            st.session_state.clear()
+            st.rerun()
+        else: st.error("Invalid password match.")
+    st.stop()
+
+# Sidebar Setup
 role = logged_in_user["role"]
 my_school = str(logged_in_user["school"])
-
 st.sidebar.title("Zein AI")
-st.sidebar.info(f"User: {logged_in_user['username']}\nRole: {role.upper()}")
+st.sidebar.info(f"User: {logged_in_user['username']}\nSchool: {my_school}")
 if st.sidebar.button("Logout"):
     st.session_state.clear()
     st.rerun()
 
 # =========================
-# SUPERADMIN: SYSTEM CONTROL
+# ROLES LOGIC
 # =========================
+
 if role == "superadmin":
     st.header("🌐 Global Master Controller")
     c1, c2 = st.columns([1, 2])
     with c1:
-        s_name = st.text_input("Institution Name")
+        s_name = st.text_input("Institution Name (Admin Username)").strip()
         s_type = st.selectbox("Level", ["Junior", "Senior", "Both"])
         if st.button("Activate School"):
             if s_name and s_name not in schools['school_name'].values:
-                new_sch = pd.DataFrame([[s_name, s_type, "Active"]], columns=COLS["schools"])
-                schools = pd.concat([schools, new_sch], ignore_index=True)
+                schools = pd.concat([schools, pd.DataFrame([[s_name, s_type, "Active"]], columns=COLS["schools"])], ignore_index=True)
                 save(schools, "schools")
-                # Create Admin for that school
-                new_a = pd.DataFrame([[s_name, hash_password(s_name), "admin", s_name, "000", "school_name"]], columns=COLS["users"])
+                new_a = pd.DataFrame([[s_name, hash_password(s_name), "admin", s_name, "000", "Initial", "True"]], columns=COLS["users"])
                 users = pd.concat([users, new_a], ignore_index=True)
                 save(users, "users")
-                st.success(f"{s_name} Activated!"); st.rerun()
-    with c2: st.dataframe(schools, use_container_width=True)
+                st.success(f"{s_name} active. Password is '{s_name}'")
+    with c2: st.dataframe(schools)
 
-# =========================
-# ADMIN: ENROLLMENT & STAFF
-# =========================
 elif role == "admin":
-    sch_type = schools[schools.school_name == my_school].iloc[0]['type'] if not schools[schools.school_name == my_school].empty else "Both"
-    st.header(f"🏫 Admin Dashboard: {my_school}")
-    t1, t2 = st.tabs(["Student Enrollment", "Staff Management"])
-    
-    with t1:
-        st.subheader("New Student & Parent Registration")
-        with st.form("enroll", clear_on_submit=True):
-            col_a, col_b = st.columns(2)
-            adm = col_a.text_input("Student ADM Number")
-            name = col_a.text_input("Student Full Name")
-            grade = col_a.selectbox("Assign Grade", LEVEL_OPTIONS.get(sch_type, ["Grade 7"]))
-            p_phone = col_b.text_input("Parent Phone Number (Required)")
-            p_hint = col_b.text_input("Security Hint (e.g. Pet name)")
-            
-            st.warning("Note: Parent Phone will serve as the Parent's Login and Password.")
-            
-            if st.form_submit_button("Enroll Student & Register Parent"):
-                if adm and name and p_phone:
-                    # 1. Save Student
-                    new_std = pd.DataFrame([[adm, name, grade, my_school, p_phone, CURRENT_YEAR]], columns=COLS["students"])
-                    students = pd.concat([students, new_std], ignore_index=True)
-                    save(students, "students")
-                    
-                    # 2. Save Student User Account
-                    u_s = [adm, hash_password("1234"), "student", my_school, p_phone, "1234"]
-                    # 3. Save Parent User Account
-                    u_p = [p_phone, hash_password(p_phone), "parent", my_school, p_phone, p_hint]
-                    
-                    new_users = pd.DataFrame([u_s, u_p], columns=COLS["users"])
-                    users = pd.concat([users, new_users], ignore_index=True).drop_duplicates('username', keep='last')
-                    save(users, "users")
-                    st.success(f"Success! Student {name} enrolled. Parent account {p_phone} created.")
-                else: st.error("Please fill all required fields.")
-
-    with t2:
-        st.subheader("Add Teacher")
-        tu, tp = st.text_input("Teacher Username"), st.text_input("Teacher Password", type="password")
-        th = st.text_input("Password Recovery Hint")
-        if st.button("Create Teacher Account"):
-            t_acc = pd.DataFrame([[tu, hash_password(tp), "teacher", my_school, "000", th]], columns=COLS["users"])
-            users = pd.concat([users, t_acc], ignore_index=True).drop_duplicates('username', keep='last')
-            save(users, "users"); st.success(f"Teacher account '{tu}' ready.")
-
-# =========================
-# TEACHER: MARKS ENTRY (BULK)
-# =========================
-elif role == "teacher":
+    st.header(f"🏫 Admin Hub: {my_school}")
     sch_type = schools[schools.school_name == my_school].iloc[0]['type']
-    st.header("📝 Performance Management")
-    
-    sel_cls = st.sidebar.selectbox("Select Grade", LEVEL_OPTIONS.get(sch_type, []))
-    sel_term = st.sidebar.selectbox("Select Term", TERMS)
-    
-    t1, t2 = st.tabs(["Manual Entry", "Bulk Upload (CSV)"])
-    
-    cls_stds = students[(students.school == my_school) & (students['class'] == sel_cls)]
-    
-    if cls_stds.empty:
-        st.info("No students enrolled in this grade yet.")
-    else:
-        with t1:
-            subj = st.text_input("Subject Name (e.g., Mathematics)").strip()
-            if subj:
-                df_entry = pd.DataFrame({"adm_no": cls_stds.adm_no.values, "Name": cls_stds.name.values, "Marks": 0.0})
-                edited = st.data_editor(df_entry, use_container_width=True, hide_index=True)
-                if st.button("Save Manual Grades"):
-                    new_rows = [[str(r['adm_no']), my_school, CURRENT_YEAR, sel_term, subj, r['Marks']] for _, r in edited.iterrows()]
-                    marks = pd.concat([marks, pd.DataFrame(new_rows, columns=COLS["marks"])], ignore_index=True)
-                    marks = marks.drop_duplicates(subset=['adm_no', 'year', 'term', 'subject'], keep='last')
-                    save(marks, "marks"); st.success("Grades saved.")
+    t1, t2, t3 = st.tabs(["Enrollment", "Staff", "Promotion System"])
 
-        with t2:
-            st.subheader("Bulk Import via CSV")
-            # Create template
-            template = pd.DataFrame({"adm_no": cls_stds.adm_no.values, "subject": "Enter Subject", "marks": 0.0})
-            csv = template.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV Template", data=csv, file_name=f"{sel_cls}_template.csv", mime="text/csv")
-            
-            uploaded_file = st.file_uploader("Upload filled template", type="csv")
-            if uploaded_file:
-                up_df = pd.read_csv(uploaded_file)
-                if st.button("Confirm Bulk Upload"):
-                    up_df['school'] = my_school
-                    up_df['year'] = CURRENT_YEAR
-                    up_df['term'] = sel_term
-                    # Reorder to match COLS["marks"]
-                    up_df = up_df[COLS["marks"]]
-                    marks = pd.concat([marks, up_df], ignore_index=True)
-                    marks = marks.drop_duplicates(subset=['adm_no', 'year', 'term', 'subject'], keep='last')
-                    save(marks, "marks")
-                    st.success("Bulk marks uploaded successfully.")
+    with t1:
+        with st.form("enroll", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            adm = col1.text_input("ADM Number")
+            kemis = col1.text_input("KEMIS Number")
+            name = col1.text_input("Full Name")
+            grade = col2.selectbox("Grade", LEVEL_OPTIONS.get(sch_type, ["Grade 7"]))
+            p_phone = col2.text_input("Parent Phone")
+            p_hint = col2.text_input("Recovery Hint")
+            if st.form_submit_button("Register Student"):
+                if all([adm, kemis, name, p_phone]):
+                    s_data = pd.DataFrame([[adm, kemis, name, grade, my_school, p_phone, CURRENT_YEAR, "Active"]], columns=COLS["students"])
+                    students = pd.concat([students, s_data], ignore_index=True)
+                    save(students, "students")
+                    u_data = pd.DataFrame([
+                        [p_phone, hash_password(p_phone), "parent", my_school, p_phone, p_hint, "False"],
+                        [adm, hash_password("1234"), "student", my_school, p_phone, "1234", "False"]
+                    ], columns=COLS["users"])
+                    users = pd.concat([users, u_data], ignore_index=True).drop_duplicates('username', keep='last')
+                    save(users, "users")
+                    st.success("Accounts Created.")
 
-# =========================
-# PARENT / STUDENT: HUB
-# =========================
+    with t3:
+        st.subheader("End of Year Promotion")
+        st.warning("This will advance all students to the next grade level.")
+        if st.button("Promote All Students"):
+            for i, row in students[students.school == my_school].iterrows():
+                current_grade = row['class']
+                all_grades = LEVEL_OPTIONS.get(sch_type, [])
+                if current_grade in all_grades:
+                    idx = all_grades.index(current_grade)
+                    if idx + 1 < len(all_grades):
+                        students.at[i, 'class'] = all_grades[idx+1]
+                    else:
+                        students.at[i, 'status'] = "Alumni"
+            save(students, "students")
+            st.success("Promotion Completed!")
+
+elif role == "teacher":
+    st.header("📝 Academic Entry")
+    sch_type = schools[schools.school_name == my_school].iloc[0]['type']
+    sel_cls = st.sidebar.selectbox("Grade", LEVEL_OPTIONS.get(sch_type, []))
+    sel_term = st.sidebar.selectbox("Term", TERMS)
+    
+    active_stds = students[(students.school == my_school) & (students['class'] == sel_cls) & (students.status == "Active")]
+    
+    if not active_stds.empty:
+        subj = st.text_input("Subject").strip()
+        if subj:
+            df_entry = pd.DataFrame({"adm_no": active_stds.adm_no.values, "Name": active_stds.name.values, "Marks": 0.0})
+            edited = st.data_editor(df_entry, use_container_width=True, hide_index=True)
+            if st.button("Save Grades"):
+                new_m = [[str(r['adm_no']), my_school, CURRENT_YEAR, sel_term, subj, r['Marks']] for _, r in edited.iterrows()]
+                marks = pd.concat([marks, pd.DataFrame(new_m, columns=COLS["marks"])], ignore_index=True)
+                marks = marks.drop_duplicates(subset=['adm_no', 'year', 'term', 'subject'], keep='last')
+                save(marks, "marks"); st.success("Grades recorded.")
+    else: st.info("No active students in this grade.")
+
 elif role in ["parent", "student"]:
-    st.header("📊 Performance Hub")
+    st.header("📊 Results Center")
+    search = logged_in_user['username']
+    my_stds = students[students.parent_phone == search] if role == 'parent' else students[students.adm_no == search]
     
-    # Logic to fetch records
-    search_val = logged_in_user['username']
-    if role == 'parent':
-        # Parents see all students linked to their phone
-        my_records = students[students['parent_phone'] == search_val]
-    else:
-        # Students see only their own
-        my_records = students[students['adm_no'] == search_val]
-    
-    if not my_records.empty:
-        selected_adm = st.selectbox("Select Student Profile", my_records.adm_no.unique())
-        std_info = my_records[my_records.adm_no == selected_adm].iloc[0]
+    if not my_stds.empty:
+        sel_adm = st.selectbox("Select Student", my_stds.adm_no.unique())
+        std_info = my_stds[my_stds.adm_no == sel_adm].iloc[0]
         
-        st.subheader(f"Academic Report: {std_info['name']}")
-        st.markdown(f"**ADM:** {std_info['adm_no']} | **Grade:** {std_info['class']} | **School:** {std_info['school']}")
+        st.subheader(f"{std_info['name']} ({std_info['class']})")
         
-        std_marks = marks[(marks.adm_no == str(selected_adm)) & (marks.year == CURRENT_YEAR)]
+        tab_current, tab_history = st.tabs(["Current Year Results", "Past Years Archive"])
         
-        if not std_marks.empty:
-            report = std_marks.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-")
-            st.table(report)
+        with tab_current:
+            c_marks = marks[(marks.adm_no == str(sel_adm)) & (marks.year == CURRENT_YEAR)]
+            if not c_marks.empty:
+                st.table(c_marks.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-"))
+            else: st.warning("No marks for this year.")
             
-            st.divider()
-            st.subheader("📈 Performance Trend")
-            chart_data = std_marks.pivot_table(index='subject', columns='term', values='marks', aggfunc='last')
-            st.bar_chart(chart_data)
-        else:
-            st.warning("No grades have been recorded for this student for the current year.")
-    else:
-        st.error("No student records are linked to this account.")
-
-# =========================
-# FINISHED
-# =========================
+        with tab_history:
+            h_marks = marks[(marks.adm_no == str(sel_adm)) & (marks.year != CURRENT_YEAR)]
+            if not h_marks.empty:
+                years = sorted(h_marks.year.unique(), reverse=True)
+                sel_year = st.selectbox("Select Past Year", years)
+                y_data = h_marks[h_marks.year == sel_year]
+                st.dataframe(y_data.pivot_table(index='subject', columns='term', values='marks', aggfunc='last').fillna("-"))
+            else: st.info("No historical data available.")
