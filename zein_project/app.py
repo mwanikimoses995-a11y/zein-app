@@ -40,7 +40,6 @@ from enum import Enum
 from io import BytesIO
 from contextlib import contextmanager
 from functools import wraps
-import schedule
 
 # Optional imports with graceful fallbacks
 try:
@@ -424,13 +423,13 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS students (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    kemis_number TEXT,  -- Kenya Education Management Information System
-                    admission_number TEXT NOT NULL,  -- School-specific ADM no
+                    kemis_number TEXT,
+                    admission_number TEXT NOT NULL,
                     name TEXT NOT NULL,
                     grade TEXT NOT NULL,
                     stream TEXT DEFAULT 'Default',
                     school_id INTEGER NOT NULL,
-                    guardian_phone TEXT NOT NULL,  -- Primary contact for guardian/parent
+                    guardian_phone TEXT NOT NULL,
                     guardian_email TEXT,
                     guardian_name TEXT,
                     guardian_relationship TEXT,
@@ -460,8 +459,8 @@ class DatabaseManager:
                     academic_year_id INTEGER NOT NULL,
                     subject TEXT NOT NULL,
                     marks REAL CHECK(marks >= 0 AND marks <= 100),
-                    grade TEXT,  -- Auto-calculated A, B, C, D
-                    performance_level INTEGER,  -- 1-4 CBC level
+                    grade TEXT,
+                    performance_level INTEGER,
                     entered_by INTEGER,
                     entered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     remarks TEXT,
@@ -1005,9 +1004,9 @@ class ReportCardGenerator:
         # Student info - ENHANCED with KEMIS and Stream
         student_data = [
             ['STUDENT NAME:', student_info.get('name', 'N/A'), 'ADM NO:', student_info.get('admission_number', 'N/A')],
-            ['KEMIS NO:', student_info.get('kemis_number', 'N/A'), 'GENDER:', student_info.get('gender', 'N/A')],
+            ['KEMIS NO:', student_info.get('kemis_number') or 'N/A', 'GENDER:', student_info.get('gender', 'N/A')],
             ['GRADE:', student_info.get('grade', 'N/A'), 'STREAM:', student_info.get('stream', 'N/A')],
-            ['GUARDIAN:', student_info.get('guardian_name', 'N/A'), 'PHONE:', student_info.get('guardian_phone', 'N/A')],
+            ['GUARDIAN:', student_info.get('guardian_name') or 'N/A', 'PHONE:', student_info.get('guardian_phone', 'N/A')],
             ['YEAR:', str(year), 'TERM:', term]
         ]
         student_table = Table(student_data, colWidths=[1.5*inch, 2.5*inch, 1.2*inch, 1.5*inch])
